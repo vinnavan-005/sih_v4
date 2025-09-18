@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import ProtectedRoute, { AdminRoute, StaffRoute, AllRolesRoute } from './components/common/ProtectedRoute';
 import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/AuthContext';
@@ -13,19 +13,72 @@ import AdminDashboard from './components/dashboards/AdminDashboard';
 import StaffDashboard from './components/dashboards/StaffDashboard';
 import SupervisorDashboard from './components/dashboards/SupervisorDashboard';
 
-// Feature components
+// Issue Management Components
 import IssueList from './components/issues/IssueList';
 import IssueDetails from './components/issues/IssueDetails';
+import IssueCreate from './components/issues/IssueCreate';
+import IssueSearch from './components/issues/IssueSearch';
+
+// Assignment Management Components  
+import AssignmentList from './components/assignments/AssignmentList';
+
+// Feature components
 import Analytics from './components/analytics/Analytics';
 import Escalation from './components/escalation/Escalation';
 import Settings from './components/settings/Settings';
 import TaskAssignment from './components/tasks/TaskAssignment';
 
+// Common components for placeholders
+import Sidebar from './components/common/Sidebar';
+import Header from './components/common/Header';
+
 // Error boundary component
 import ErrorBoundary from './components/common/ErrorBoundary';
 
+// Lucide React icons for placeholders
+import { 
+  MapPin, 
+  Plus, 
+  Users, 
+  BarChart3, 
+  FileText, 
+  Upload, 
+  TrendingUp, 
+  Activity, 
+  Download 
+} from 'lucide-react';
+
 // Import global styles
 import './index.css';
+
+// Placeholder Component Generator
+const PlaceholderComponent = ({ title, icon: Icon, description, buttonText, buttonAction }) => {
+  const navigate = useNavigate();
+  
+  return (
+    <div className="flex min-h-screen bg-gray-50">
+      <Sidebar />
+      <div className="flex-1 ml-60">
+        <Header title={title} />
+        <main className="p-6">
+          <div className="bg-white rounded-lg shadow-sm p-8 text-center">
+            <Icon className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">{title}</h3>
+            <p className="text-gray-600 mb-4">{description}</p>
+            {buttonText && buttonAction && (
+              <button
+                onClick={() => navigate(buttonAction)}
+                className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+              >
+                {buttonText}
+              </button>
+            )}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};
 
 // Notification component for global alerts
 const GlobalNotification = ({ message, type, onClose }) => {
@@ -42,51 +95,46 @@ const GlobalNotification = ({ message, type, onClose }) => {
   };
 
   return (
-    <div className={`fixed top-4 right-4 z-50 max-w-sm w-full p-4 border rounded-lg shadow-lg ${typeClasses[type]} transition-all duration-300`}>
-      <div className="flex justify-between items-center">
-        <p className="text-sm font-medium">{message}</p>
-        <button
+    <div className={`fixed top-4 right-4 z-50 max-w-md p-4 border rounded-lg shadow-lg ${typeClasses[type] || typeClasses.info}`}>
+      <div className="flex items-center justify-between">
+        <span className="text-sm font-medium">{message}</span>
+        <button 
           onClick={onClose}
-          className="ml-2 text-gray-400 hover:text-gray-600"
+          className="ml-4 text-xl leading-none hover:opacity-70"
         >
-          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-            <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
-          </svg>
+          ×
         </button>
       </div>
     </div>
   );
 };
 
-// Main App routing component
+// Main App Routes Component
 const AppRoutes = () => {
-  const { currentUser } = useAuth();
-
-  // Auto-redirect based on user role
-  const getDefaultRoute = () => {
-    if (!currentUser) return '/login';
-    
-    switch (currentUser.role) {
-      case 'admin':
-        return '/admin-dashboard';
-      case 'supervisor':
-        return '/supervisor-dashboard';
-      case 'staff':
-        return '/staff-dashboard';
-      case 'citizen':
-        return '/issues';
-      default:
-        return '/login';
-    }
-  };
-
   return (
     <Routes>
       {/* Public routes */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
+      <Route 
+        path="/login" 
+        element={
+          <PublicRoute redirectIfAuthenticated={true}>
+            <Login />
+          </PublicRoute>
+        } 
+      />
+      <Route 
+        path="/signup" 
+        element={
+          <PublicRoute redirectIfAuthenticated={true}>
+            <Signup />
+          </PublicRoute>
+        } 
+      />
       
-      {/* Protected dashboard routes */}
+      {/* Redirect root to login */}
+      <Route path="/" element={<Navigate to="/login" replace />} />
+
+      {/* Dashboard routes with role-based access */}
       <Route 
         path="/admin-dashboard" 
         element={
@@ -106,13 +154,13 @@ const AppRoutes = () => {
       <Route 
         path="/supervisor-dashboard" 
         element={
-          <ProtectedRoute allowedRoles={['supervisor']}>
+          <ProtectedRoute allowedRoles={['FieldSupervisor']}>
             <SupervisorDashboard />
           </ProtectedRoute>
         } 
       />
 
-      {/* Feature routes with role-based access */}
+      {/* Issue Management Routes */}
       <Route 
         path="/issues" 
         element={
@@ -130,17 +178,213 @@ const AppRoutes = () => {
         } 
       />
       <Route 
+        path="/issues/create" 
+        element={
+          <AllRolesRoute>
+            <IssueCreate />
+          </AllRolesRoute>
+        } 
+      />
+      <Route 
+        path="/issues/search" 
+        element={
+          <AllRolesRoute>
+            <IssueSearch />
+          </AllRolesRoute>
+        } 
+      />
+      <Route 
+        path="/issues/map" 
+        element={
+          <AllRolesRoute>
+            <PlaceholderComponent 
+              title="Issue Map" 
+              icon={MapPin}
+              description="Interactive map view coming soon..."
+            />
+          </AllRolesRoute>
+        } 
+      />
+
+      {/* Assignment Management Routes */}
+      <Route 
+        path="/assignments" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor', 'DepartmentStaff']}>
+            <AssignmentList />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/assignments/create" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
+            <PlaceholderComponent 
+              title="Create Assignment" 
+              icon={Plus}
+              description="Assignment creation form coming soon..."
+              buttonText="Use Task Assignment Instead"
+              buttonAction="/task-assignment"
+            />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/assignments/bulk" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
+            <PlaceholderComponent 
+              title="Bulk Assignment" 
+              icon={Users}
+              description="Bulk assignment feature coming soon..."
+            />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/assignments/stats" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
+            <PlaceholderComponent 
+              title="Assignment Statistics" 
+              icon={BarChart3}
+              description="Assignment analytics coming soon..."
+            />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* User Management Routes */}
+      <Route 
+        path="/users" 
+        element={
+          <AdminRoute>
+            <PlaceholderComponent 
+              title="User Management" 
+              icon={Users}
+              description="User management interface coming soon..."
+            />
+          </AdminRoute>
+        } 
+      />
+      <Route 
+        path="/staff" 
+        element={
+          <StaffRoute>
+            <PlaceholderComponent 
+              title="Department Staff" 
+              icon={Users}
+              description="Staff management interface coming soon..."
+            />
+          </StaffRoute>
+        } 
+      />
+
+      {/* Department Routes */}
+      <Route 
+        path="/departments" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
+            <PlaceholderComponent 
+              title="Department Statistics" 
+              icon={BarChart3}
+              description="Department analytics coming soon..."
+            />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Updates Routes */}
+      <Route 
+        path="/updates" 
+        element={
+          <AllRolesRoute>
+            <PlaceholderComponent 
+              title="Issue Updates" 
+              icon={FileText}
+              description="Updates management interface coming soon..."
+            />
+          </AllRolesRoute>
+        } 
+      />
+      <Route 
+        path="/updates/create" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor', 'DepartmentStaff']}>
+            <PlaceholderComponent 
+              title="Create Update" 
+              icon={Plus}
+              description="Update creation form coming soon..."
+            />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Files Management */}
+      <Route 
+        path="/files" 
+        element={
+          <AdminRoute>
+            <PlaceholderComponent 
+              title="File Management" 
+              icon={Upload}
+              description="File management interface coming soon..."
+            />
+          </AdminRoute>
+        } 
+      />
+
+      {/* Analytics Routes */}
+      <Route 
         path="/analytics" 
         element={
-          <ProtectedRoute allowedRoles={['admin', 'supervisor']}>
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
             <Analytics />
           </ProtectedRoute>
         } 
       />
       <Route 
+        path="/analytics/trends" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
+            <PlaceholderComponent 
+              title="Trend Analysis" 
+              icon={TrendingUp}
+              description="Trend analysis dashboard coming soon..."
+            />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/analytics/performance" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
+            <PlaceholderComponent 
+              title="Performance Metrics" 
+              icon={Activity}
+              description="Performance analytics coming soon..."
+            />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/analytics/export" 
+        element={
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
+            <PlaceholderComponent 
+              title="Data Export" 
+              icon={Download}
+              description="Data export functionality coming soon..."
+            />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Existing Feature Routes */}
+      <Route 
         path="/escalation" 
         element={
-          <ProtectedRoute allowedRoles={['admin', 'supervisor']}>
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
             <Escalation />
           </ProtectedRoute>
         } 
@@ -148,7 +392,7 @@ const AppRoutes = () => {
       <Route 
         path="/task-assignment" 
         element={
-          <ProtectedRoute allowedRoles={['admin', 'supervisor']}>
+          <ProtectedRoute allowedRoles={['Admin', 'FieldSupervisor']}>
             <TaskAssignment />
           </ProtectedRoute>
         } 
@@ -162,108 +406,96 @@ const AppRoutes = () => {
         } 
       />
 
-      {/* Default redirects */}
-      <Route path="/" element={<Navigate to={getDefaultRoute()} replace />} />
-      
-      {/* Catch-all route for 404 */}
-      <Route path="*" element={<NotFound />} />
+      {/* 404 Route */}
+      <Route 
+        path="*" 
+        element={
+          <div className="flex min-h-screen bg-gray-50">
+            <Sidebar />
+            <div className="flex-1 ml-60">
+              <Header title="Page Not Found" />
+              <main className="p-6">
+                <div className="bg-white rounded-lg shadow-sm p-8 text-center">
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">404 - Page Not Found</h3>
+                  <p className="text-gray-600 mb-4">The page you're looking for doesn't exist.</p>
+                  <button
+                    onClick={() => window.history.back()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                  >
+                    Go Back
+                  </button>
+                </div>
+              </main>
+            </div>
+          </div>
+        } 
+      />
     </Routes>
   );
 };
 
-// 404 Not Found component
-const NotFound = () => {
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="text-center max-w-md mx-auto px-4">
-        <div className="text-6xl font-bold text-gray-300 mb-4">404</div>
-        <h1 className="text-2xl font-semibold text-gray-900 mb-2">Page Not Found</h1>
-        <p className="text-gray-600 mb-8">The page you're looking for doesn't exist or you don't have permission to access it.</p>
-        <div className="space-x-4">
-          <button
-            onClick={() => window.history.back()}
-            className="bg-gray-600 text-white px-6 py-3 rounded-lg hover:bg-gray-700 transition-colors"
-          >
-            Go Back
-          </button>
-          <button
-            onClick={() => window.location.href = '/'}
-            className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            Go Home
-          </button>
-        </div>
+// Public Route Component
+const PublicRoute = ({ children, redirectIfAuthenticated = false, redirectTo = '/' }) => {
+  const { currentUser, isLoading } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-blue-600"></div>
       </div>
-    </div>
-  );
+    );
+  }
+
+  // Redirect authenticated users away from public pages (like login/signup)
+  if (redirectIfAuthenticated && currentUser) {
+    const getDashboardPath = (role) => {
+      switch (role) {
+        case 'Admin':
+          return '/admin-dashboard';
+        case 'DepartmentStaff':
+          return '/staff-dashboard';
+        case 'FieldSupervisor':
+          return '/supervisor-dashboard';
+        default:
+          return '/login';
+      }
+    };
+    
+    const dashboardPath = getDashboardPath(currentUser.role);
+    return <Navigate to={dashboardPath} replace />;
+  }
+
+  return children;
 };
 
-// Main App component with global error boundary
+// Main App Component
 const App = () => {
   const [notification, setNotification] = React.useState(null);
 
-  // Global error handler
-  useEffect(() => {
-    const handleError = (event) => {
-      console.error('Global error:', event.error);
-      setNotification({
-        type: 'error',
-        message: 'An unexpected error occurred. Please refresh the page.'
-      });
-    };
+  const showNotification = (message, type = 'info') => {
+    setNotification({ message, type });
+  };
 
-    const handleUnhandledRejection = (event) => {
-      console.error('Unhandled promise rejection:', event.reason);
-      setNotification({
-        type: 'error',
-        message: 'A network error occurred. Please check your connection.'
-      });
-    };
-
-    window.addEventListener('error', handleError);
-    window.addEventListener('unhandledrejection', handleUnhandledRejection);
-
-    return () => {
-      window.removeEventListener('error', handleError);
-      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
-    };
-  }, []);
-
-  // Check if API is available
-  useEffect(() => {
-    const checkApiHealth = async () => {
-      try {
-        const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://192.168.1.103:8000'}/health`);
-        if (!response.ok) {
-          throw new Error('API health check failed');
-        }
-      } catch (error) {
-        console.warn('API health check failed:', error);
-        setNotification({
-          type: 'warning',
-          message: 'Unable to connect to server. Some features may be limited.'
-        });
-      }
-    };
-
-    checkApiHealth();
-  }, []);
+  const hideNotification = () => {
+    setNotification(null);
+  };
 
   return (
     <ErrorBoundary>
       <AuthProvider>
         <Router>
-          <div className="min-h-screen bg-gray-50">
-            <AppRoutes />
-            
-            {/* Global notification */}
+          <div className="App">
+            {/* Global Notification */}
             {notification && (
               <GlobalNotification
                 message={notification.message}
                 type={notification.type}
-                onClose={() => setNotification(null)}
+                onClose={hideNotification}
               />
             )}
+            
+            {/* Main App Routes */}
+            <AppRoutes />
           </div>
         </Router>
       </AuthProvider>

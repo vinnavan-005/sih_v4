@@ -9,6 +9,24 @@ class ApiService {
     this.timeout = 30000; // 30 seconds
   }
 
+  // Helper method to clean parameters - removes empty/null/undefined values
+  cleanParams(params) {
+    const cleaned = {};
+    for (const [key, value] of Object.entries(params)) {
+      // Skip empty strings, null, undefined, and empty arrays
+      if (value !== '' && value !== null && value !== undefined && !(Array.isArray(value) && value.length === 0)) {
+        cleaned[key] = value;
+      }
+    }
+    return cleaned;
+  }
+
+  // Helper method to build query string from clean parameters
+  buildQueryString(params) {
+    const cleanedParams = this.cleanParams(params);
+    return new URLSearchParams(cleanedParams).toString();
+  }
+
   // Private method for making requests
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`;
@@ -43,390 +61,430 @@ class ApiService {
         );
       }
 
-      // Handle empty responses
       const contentType = response.headers.get('content-type');
       if (contentType && contentType.includes('application/json')) {
         return await response.json();
       }
 
-      return response;
+      return response.text();
     } catch (error) {
       if (error.name === 'AbortError') {
         throw new ApiError('Request timeout', 408);
       }
-      throw error;
+      
+      if (error instanceof ApiError) {
+        await this.handleAuthError(error);
+        throw error;
+      }
+
+      throw new ApiError(
+        error.message || ERROR_MESSAGES.NETWORK_ERROR,
+        0
+      );
     }
   }
 
-  // Token management
+  // Token management methods
   getToken() {
-    return localStorage.getItem('access_token');
+    return localStorage.getItem('token') || sessionStorage.getItem('token');
   }
 
-  setToken(token) {
-    localStorage.setItem('access_token', token);
+  setToken(token, persistent = true) {
+    if (persistent) {
+      localStorage.setItem('token', token);
+      sessionStorage.removeItem('token');
+    } else {
+      sessionStorage.setItem('token', token);
+      localStorage.removeItem('token');
+    }
   }
 
   removeToken() {
-    localStorage.removeItem('access_token');
+    localStorage.removeItem('token');
+    sessionStorage.removeItem('token');
+    localStorage.removeItem('currentUser');
   }
 
-  // Authentication API calls
-  auth = {
-    login: async (credentials) => {
-      const response = await this.request(API_ENDPOINTS.AUTH.LOGIN, {
-        method: 'POST',
-        body: JSON.stringify(credentials),
-      });
-      
-      if (response.access_token) {
-        this.setToken(response.access_token);
-      }
-      
-      return response;
-    },
+  // Auth API calls
+  async login(credentials) {
+    const response = await this.request(API_ENDPOINTS.AUTH.LOGIN, {
+      method: 'POST',
+      body: JSON.stringify(credentials),
+    });
+    
+    if (response.access_token) {
+      this.setToken(response.access_token);
+    }
+    
+    return response;
+  }
 
-    register: async (userData) => {
-      return await this.request(API_ENDPOINTS.AUTH.SIGNUP, {
-        method: 'POST',
-        body: JSON.stringify(userData),
-      });
-    },
+  async signup(userData) {
+    return await this.request(API_ENDPOINTS.AUTH.SIGNUP, {
+      method: 'POST',
+      body: JSON.stringify(userData),
+    });
+  }
 
-    logout: async () => {
-      try {
-        await this.request(API_ENDPOINTS.AUTH.LOGOUT, {
-          method: 'POST',
-        });
-      } finally {
-        this.removeToken();
-      }
-    },
-
-    getCurrentUser: async () => {
-      return await this.request(API_ENDPOINTS.AUTH.PROFILE);
-    },
-
-    verifyToken: async () => {
-      return await this.request(API_ENDPOINTS.AUTH.VERIFY_TOKEN, {
+  async logout() {
+    try {
+      await this.request(API_ENDPOINTS.AUTH.LOGOUT, {
         method: 'POST',
       });
-    },
+    } finally {
+      this.removeToken();
+    }
+  }
 
-    refreshToken: async () => {
-      return await this.request(API_ENDPOINTS.AUTH.REFRESH, {
-        method: 'POST',
-      });
-    },
-  };
+  async getCurrentUser() {
+    return await this.request(API_ENDPOINTS.AUTH.PROFILE);
+  }
 
-  // Issues API calls
-  issues = {
-    list: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.ISSUES.LIST}?${queryString}` : API_ENDPOINTS.ISSUES.LIST;
-      return await this.request(endpoint);
-    },
+  async verifyToken() {
+    return await this.request(API_ENDPOINTS.AUTH.VERIFY_TOKEN, {
+      method: 'POST',
+    });
+  }
 
-    create: async (issueData) => {
-      return await this.request(API_ENDPOINTS.ISSUES.CREATE, {
-        method: 'POST',
-        body: JSON.stringify(issueData),
-      });
-    },
+  async refreshToken() {
+    return await this.request(API_ENDPOINTS.AUTH.REFRESH, {
+      method: 'POST',
+    });
+  }
 
-    createWithImage: async (formData) => {
-      return await this.request(API_ENDPOINTS.ISSUES.CREATE_WITH_IMAGE, {
-        method: 'POST',
-        headers: {}, // Let browser set Content-Type for FormData
-        body: formData,
-      });
-    },
+  // Issues API calls - FIXED PARAMETER HANDLING
+  async getIssues(params = {}) {
+    // Map frontend parameter names to backend parameter names if needed
+    const backendParams = {
+      status: params.status, // maps to status_filter in backend
+      category: params.category,
+      citizen_id: params.citizen_id,
+      department: params.department,
+      min_upvotes: params.min_upvotes,
+      has_location: params.has_location,
+      search: params.search,
+      page: params.page || 1,
+      per_page: params.per_page || 20,
+      order_by: params.order_by || '-created_at'
+    };
 
-    getById: async (issueId) => {
-      return await this.request(API_ENDPOINTS.ISSUES.DETAIL.replace(':id', issueId));
-    },
+    const queryString = this.buildQueryString(backendParams);
+    const endpoint = queryString ? `${API_ENDPOINTS.ISSUES.LIST}?${queryString}` : API_ENDPOINTS.ISSUES.LIST;
+    return await this.request(endpoint);
+  }
 
-    update: async (issueId, updateData) => {
-      return await this.request(API_ENDPOINTS.ISSUES.UPDATE.replace(':id', issueId), {
-        method: 'PUT',
-        body: JSON.stringify(updateData),
-      });
-    },
+  async getIssue(id) {
+    return await this.request(API_ENDPOINTS.ISSUES.DETAIL.replace(':id', id));
+  }
 
-    delete: async (issueId) => {
-      return await this.request(API_ENDPOINTS.ISSUES.DELETE.replace(':id', issueId), {
-        method: 'DELETE',
-      });
-    },
+  async createIssue(issueData) {
+    return await this.request(API_ENDPOINTS.ISSUES.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(issueData),
+    });
+  }
 
-    vote: async (issueId) => {
-      return await this.request(API_ENDPOINTS.ISSUES.VOTE.replace(':id', issueId), {
-        method: 'POST',
-      });
-    },
+  async updateIssue(id, issueData) {
+    return await this.request(API_ENDPOINTS.ISSUES.UPDATE.replace(':id', id), {
+      method: 'PUT',
+      body: JSON.stringify(issueData),
+    });
+  }
 
-    removeVote: async (issueId) => {
-      return await this.request(API_ENDPOINTS.ISSUES.VOTE.replace(':id', issueId), {
-        method: 'DELETE',
-      });
-    },
+  async deleteIssue(id) {
+    return await this.request(API_ENDPOINTS.ISSUES.DELETE.replace(':id', id), {
+      method: 'DELETE',
+    });
+  }
 
-    search: async (searchParams) => {
-      return await this.request(API_ENDPOINTS.ISSUES.SEARCH, {
-        method: 'POST',
-        body: JSON.stringify(searchParams),
-      });
-    },
+  async voteOnIssue(id, voteType) {
+    return await this.request(API_ENDPOINTS.ISSUES.VOTE.replace(':id', id), {
+      method: 'POST',
+      body: JSON.stringify({ vote_type: voteType }),
+    });
+  }
 
-    getStats: async () => {
-      return await this.request(API_ENDPOINTS.ISSUES.STATS);
-    },
+  async searchIssues(params = {}) {
+    // Search uses POST method with body
+    return await this.request(API_ENDPOINTS.ISSUES.SEARCH, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+  }
 
-    getNearby: async (params) => {
-      const queryString = new URLSearchParams(params).toString();
-      return await this.request(`${API_ENDPOINTS.ISSUES.NEARBY}?${queryString}`);
-    },
+  async getIssueStats() {
+    return await this.request(API_ENDPOINTS.ISSUES.STATS);
+  }
 
-    uploadImage: async (formData) => {
-      return await this.request(API_ENDPOINTS.ISSUES.UPLOAD_IMAGE, {
-        method: 'POST',
-        headers: {}, // Let browser set Content-Type for FormData
-        body: formData,
-      });
-    },
-  };
+  async getNearbyIssues(params = {}) {
+    const backendParams = {
+      latitude: params.latitude,
+      longitude: params.longitude,
+      radius: params.radius || 5.0,
+      category: params.category,
+      status: params.status,
+      limit: params.limit || 20
+    };
 
-  // Assignments API calls
-  assignments = {
-    list: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.ASSIGNMENTS.LIST}?${queryString}` : API_ENDPOINTS.ASSIGNMENTS.LIST;
-      return await this.request(endpoint);
-    },
+    const queryString = this.buildQueryString(backendParams);
+    const endpoint = queryString ? `${API_ENDPOINTS.ISSUES.NEARBY}?${queryString}` : API_ENDPOINTS.ISSUES.NEARBY;
+    return await this.request(endpoint);
+  }
 
-    create: async (assignmentData) => {
-      return await this.request(API_ENDPOINTS.ASSIGNMENTS.CREATE, {
-        method: 'POST',
-        body: JSON.stringify(assignmentData),
-      });
-    },
+  // Assignments API calls - FIXED PARAMETER HANDLING
+  async getAssignments(params = {}) {
+    const backendParams = {
+      issue_id: params.issue_id,
+      staff_id: params.staff_id,
+      status: params.status,
+      department: params.department,
+      page: params.page || 1,
+      per_page: params.per_page || 20
+    };
 
-    getById: async (assignmentId) => {
-      return await this.request(API_ENDPOINTS.ASSIGNMENTS.DETAIL.replace(':id', assignmentId));
-    },
+    const queryString = this.buildQueryString(backendParams);
+    const endpoint = queryString ? `${API_ENDPOINTS.ASSIGNMENTS.LIST}?${queryString}` : API_ENDPOINTS.ASSIGNMENTS.LIST;
+    return await this.request(endpoint);
+  }
 
-    update: async (assignmentId, updateData) => {
-      return await this.request(API_ENDPOINTS.ASSIGNMENTS.UPDATE.replace(':id', assignmentId), {
-        method: 'PUT',
-        body: JSON.stringify(updateData),
-      });
-    },
+  async getAssignment(id) {
+    return await this.request(API_ENDPOINTS.ASSIGNMENTS.DETAIL.replace(':id', id));
+  }
 
-    delete: async (assignmentId) => {
-      return await this.request(API_ENDPOINTS.ASSIGNMENTS.DELETE.replace(':id', assignmentId), {
-        method: 'DELETE',
-      });
-    },
+  async createAssignment(assignmentData) {
+    return await this.request(API_ENDPOINTS.ASSIGNMENTS.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(assignmentData),
+    });
+  }
 
-    getMyAssignments: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.ASSIGNMENTS.MY_ASSIGNMENTS}?${queryString}` : API_ENDPOINTS.ASSIGNMENTS.MY_ASSIGNMENTS;
-      return await this.request(endpoint);
-    },
+  async updateAssignment(id, assignmentData) {
+    return await this.request(API_ENDPOINTS.ASSIGNMENTS.UPDATE.replace(':id', id), {
+      method: 'PUT',
+      body: JSON.stringify(assignmentData),
+    });
+  }
 
-    bulkAssign: async (bulkData) => {
-      return await this.request(API_ENDPOINTS.ASSIGNMENTS.BULK_ASSIGN, {
-        method: 'POST',
-        body: JSON.stringify(bulkData),
-      });
-    },
+  async deleteAssignment(id) {
+    return await this.request(API_ENDPOINTS.ASSIGNMENTS.DELETE.replace(':id', id), {
+      method: 'DELETE',
+    });
+  }
 
-    getDepartmentStats: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.ASSIGNMENTS.STATS}?${queryString}` : API_ENDPOINTS.ASSIGNMENTS.STATS;
-      return await this.request(endpoint);
-    },
+  async getMyAssignments(params = {}) {
+    const queryString = this.buildQueryString(params);
+    const endpoint = queryString ? `${API_ENDPOINTS.ASSIGNMENTS.MY_ASSIGNMENTS}?${queryString}` : API_ENDPOINTS.ASSIGNMENTS.MY_ASSIGNMENTS;
+    return await this.request(endpoint);
+  }
 
-    getWorkloadStats: async () => {
-      return await this.request(API_ENDPOINTS.ASSIGNMENTS.WORKLOAD);
-    },
-  };
+  async bulkAssign(assignmentData) {
+    return await this.request(API_ENDPOINTS.ASSIGNMENTS.BULK_ASSIGN, {
+      method: 'POST',
+      body: JSON.stringify(assignmentData),
+    });
+  }
 
-  // Updates API calls
-  updates = {
-    list: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.UPDATES.LIST}?${queryString}` : API_ENDPOINTS.UPDATES.LIST;
-      return await this.request(endpoint);
-    },
+  async getAssignmentStats() {
+    return await this.request(API_ENDPOINTS.ASSIGNMENTS.STATS);
+  }
 
-    create: async (updateData) => {
-      return await this.request(API_ENDPOINTS.UPDATES.CREATE, {
-        method: 'POST',
-        body: JSON.stringify(updateData),
-      });
-    },
+  async getWorkloadStats() {
+    return await this.request(API_ENDPOINTS.ASSIGNMENTS.WORKLOAD);
+  }
 
-    getById: async (updateId) => {
-      return await this.request(API_ENDPOINTS.UPDATES.DETAIL.replace(':id', updateId));
-    },
+  // Updates API calls - FIXED PARAMETER HANDLING
+  async getUpdates(params = {}) {
+    const backendParams = {
+      issue_id: params.issue_id,
+      staff_id: params.staff_id,
+      page: params.page || 1,
+      per_page: params.per_page || 20
+    };
 
-    delete: async (updateId) => {
-      return await this.request(API_ENDPOINTS.UPDATES.DELETE.replace(':id', updateId), {
-        method: 'DELETE',
-      });
-    },
+    const queryString = this.buildQueryString(backendParams);
+    const endpoint = queryString ? `${API_ENDPOINTS.UPDATES.LIST}?${queryString}` : API_ENDPOINTS.UPDATES.LIST;
+    return await this.request(endpoint);
+  }
 
-    getRecent: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.UPDATES.RECENT}?${queryString}` : API_ENDPOINTS.UPDATES.RECENT;
-      return await this.request(endpoint);
-    },
+  async createUpdate(updateData) {
+    return await this.request(API_ENDPOINTS.UPDATES.CREATE, {
+      method: 'POST',
+      body: JSON.stringify(updateData),
+    });
+  }
 
-    getByIssue: async (issueId) => {
-      return await this.request(API_ENDPOINTS.UPDATES.BY_ISSUE.replace(':id', issueId));
-    },
+  async getUpdate(id) {
+    return await this.request(API_ENDPOINTS.UPDATES.DETAIL.replace(':id', id));
+  }
 
-    getActivityStats: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.UPDATES.STATS}?${queryString}` : API_ENDPOINTS.UPDATES.STATS;
-      return await this.request(endpoint);
-    },
-  };
+  async deleteUpdate(id) {
+    return await this.request(API_ENDPOINTS.UPDATES.DELETE.replace(':id', id), {
+      method: 'DELETE',
+    });
+  }
 
-  // Users API calls
-  users = {
-    list: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.USERS.LIST}?${queryString}` : API_ENDPOINTS.USERS.LIST;
-      return await this.request(endpoint);
-    },
+  async getRecentUpdates(params = {}) {
+    const queryString = this.buildQueryString(params);
+    const endpoint = queryString ? `${API_ENDPOINTS.UPDATES.RECENT}?${queryString}` : API_ENDPOINTS.UPDATES.RECENT;
+    return await this.request(endpoint);
+  }
 
-    getById: async (userId) => {
-      return await this.request(API_ENDPOINTS.USERS.DETAIL.replace(':id', userId));
-    },
+  async getIssueUpdates(issueId) {
+    return await this.request(API_ENDPOINTS.UPDATES.BY_ISSUE.replace(':id', issueId));
+  }
 
-    update: async (userId, updateData) => {
-      return await this.request(API_ENDPOINTS.USERS.UPDATE.replace(':id', userId), {
-        method: 'PUT',
-        body: JSON.stringify(updateData),
-      });
-    },
+  async getActivityStats() {
+    return await this.request(API_ENDPOINTS.UPDATES.STATS);
+  }
 
-    getStaff: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.USERS.STAFF}?${queryString}` : API_ENDPOINTS.USERS.STAFF;
-      return await this.request(endpoint);
-    },
+  // Users API calls - FIXED PARAMETER HANDLING
+  async getUsers(params = {}) {
+    const backendParams = {
+      role: params.role,
+      department: params.department,
+      page: params.page || 1,
+      per_page: params.per_page || 20
+    };
 
-    getDepartments: async () => {
-      return await this.request(API_ENDPOINTS.USERS.DEPARTMENTS);
-    },
+    const queryString = this.buildQueryString(backendParams);
+    const endpoint = queryString ? `${API_ENDPOINTS.USERS.LIST}?${queryString}` : API_ENDPOINTS.USERS.LIST;
+    return await this.request(endpoint);
+  }
 
-    getStats: async () => {
-      return await this.request(API_ENDPOINTS.USERS.STATS);
-    },
+  async getUser(id) {
+    return await this.request(API_ENDPOINTS.USERS.DETAIL.replace(':id', id));
+  }
 
-    getWorkload: async (userId) => {
-      return await this.request(API_ENDPOINTS.USERS.WORKLOAD.replace(':id', userId));
-    },
+  async updateUser(id, userData) {
+    return await this.request(API_ENDPOINTS.USERS.UPDATE.replace(':id', id), {
+      method: 'PUT',
+      body: JSON.stringify(userData),
+    });
+  }
 
-    changeRole: async (userId, newRole) => {
-      return await this.request(API_ENDPOINTS.USERS.CHANGE_ROLE.replace(':id', userId), {
-        method: 'POST',
-        body: JSON.stringify({ role: newRole }),
-      });
-    },
-  };
+  async getStaffUsers(params = {}) {
+    const backendParams = {
+      department: params.department,
+      available_only: params.available_only,
+      page: params.page || 1,
+      per_page: params.per_page || 50
+    };
+
+    const queryString = this.buildQueryString(backendParams);
+    const endpoint = queryString ? `${API_ENDPOINTS.USERS.STAFF}?${queryString}` : API_ENDPOINTS.USERS.STAFF;
+    return await this.request(endpoint);
+  }
+
+  async getDepartments() {
+    return await this.request(API_ENDPOINTS.USERS.DEPARTMENTS);
+  }
+
+  async getUserStats() {
+    return await this.request(API_ENDPOINTS.USERS.STATS);
+  }
+
+  async getUserWorkload(userId) {
+    return await this.request(API_ENDPOINTS.USERS.WORKLOAD.replace(':id', userId));
+  }
+
+  async changeUserRole(userId, newRole) {
+    return await this.request(API_ENDPOINTS.USERS.CHANGE_ROLE.replace(':id', userId), {
+      method: 'POST',
+      body: JSON.stringify({ role: newRole }),
+    });
+  }
 
   // Files API calls
-  files = {
-    uploadImage: async (formData) => {
-      return await this.request(API_ENDPOINTS.FILES.UPLOAD_IMAGE, {
-        method: 'POST',
-        headers: {}, // Let browser set Content-Type for FormData
-        body: formData,
-      });
-    },
+  async uploadImage(formData) {
+    return await this.request(API_ENDPOINTS.FILES.UPLOAD_IMAGE, {
+      method: 'POST',
+      headers: {}, // Let browser set Content-Type for FormData
+      body: formData,
+    });
+  }
 
-    uploadDocument: async (formData) => {
-      return await this.request(API_ENDPOINTS.FILES.UPLOAD_DOCUMENT, {
-        method: 'POST',
-        headers: {}, // Let browser set Content-Type for FormData
-        body: formData,
-      });
-    },
+  async uploadDocument(formData) {
+    return await this.request(API_ENDPOINTS.FILES.UPLOAD_DOCUMENT, {
+      method: 'POST',
+      headers: {}, // Let browser set Content-Type for FormData
+      body: formData,
+    });
+  }
 
-    uploadMultiple: async (formData) => {
-      return await this.request(API_ENDPOINTS.FILES.UPLOAD_MULTIPLE, {
-        method: 'POST',
-        headers: {}, // Let browser set Content-Type for FormData
-        body: formData,
-      });
-    },
+  async uploadMultiple(formData) {
+    return await this.request(API_ENDPOINTS.FILES.UPLOAD_MULTIPLE, {
+      method: 'POST',
+      headers: {}, // Let browser set Content-Type for FormData
+      body: formData,
+    });
+  }
 
-    cameraCapture: async (formData) => {
-      return await this.request(API_ENDPOINTS.FILES.CAMERA_CAPTURE, {
-        method: 'POST',
-        headers: {}, // Let browser set Content-Type for FormData
-        body: formData,
-      });
-    },
+  async captureFromCamera(formData) {
+    return await this.request(API_ENDPOINTS.FILES.CAMERA_CAPTURE, {
+      method: 'POST',
+      headers: {}, // Let browser set Content-Type for FormData
+      body: formData,
+    });
+  }
 
-    delete: async (filePath) => {
-      return await this.request(API_ENDPOINTS.FILES.DELETE.replace(':path', encodeURIComponent(filePath)), {
-        method: 'DELETE',
-      });
-    },
+  async deleteFile(filePath) {
+    return await this.request(API_ENDPOINTS.FILES.DELETE.replace(':path', encodeURIComponent(filePath)), {
+      method: 'DELETE',
+    });
+  }
 
-    list: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.FILES.LIST}?${queryString}` : API_ENDPOINTS.FILES.LIST;
-      return await this.request(endpoint);
-    },
+  async listFiles(params = {}) {
+    const queryString = this.buildQueryString(params);
+    const endpoint = queryString ? `${API_ENDPOINTS.FILES.LIST}?${queryString}` : API_ENDPOINTS.FILES.LIST;
+    return await this.request(endpoint);
+  }
 
-    getInfo: async () => {
-      return await this.request(API_ENDPOINTS.FILES.INFO);
-    },
+  async getFileInfo() {
+    return await this.request(API_ENDPOINTS.FILES.INFO);
+  }
 
-    validate: async (fileUrl) => {
-      return await this.request(`${API_ENDPOINTS.FILES.VALIDATE}?file_url=${encodeURIComponent(fileUrl)}`);
-    },
+  async validateFile(fileUrl) {
+    return await this.request(`${API_ENDPOINTS.FILES.VALIDATE}?file_url=${encodeURIComponent(fileUrl)}`);
+  }
 
-    getCameraStatus: async () => {
-      return await this.request(API_ENDPOINTS.FILES.CAMERA_STATUS);
-    },
-  };
+  async getCameraStatus() {
+    return await this.request(API_ENDPOINTS.FILES.CAMERA_STATUS);
+  }
 
-  // Dashboard API calls
-  dashboard = {
-    getOverview: async () => {
-      return await this.request(API_ENDPOINTS.DASHBOARD.OVERVIEW);
-    },
+  // DASHBOARD API CALLS
+  async getDashboardOverview() {
+    return await this.request(API_ENDPOINTS.DASHBOARD.OVERVIEW);
+  }
 
-    getTrends: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.DASHBOARD.TRENDS}?${queryString}` : API_ENDPOINTS.DASHBOARD.TRENDS;
-      return await this.request(endpoint);
-    },
+  async getTrends(params = {}) {
+    const backendParams = {
+      days: params.days || 30
+    };
 
-    getDepartmentStats: async () => {
-      return await this.request(API_ENDPOINTS.DASHBOARD.DEPARTMENTS);
-    },
+    const queryString = this.buildQueryString(backendParams);
+    const endpoint = queryString ? `${API_ENDPOINTS.DASHBOARD.TRENDS}?${queryString}` : API_ENDPOINTS.DASHBOARD.TRENDS;
+    return await this.request(endpoint);
+  }
 
-    getPerformanceMetrics: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.DASHBOARD.PERFORMANCE}?${queryString}` : API_ENDPOINTS.DASHBOARD.PERFORMANCE;
-      return await this.request(endpoint);
-    },
+  async getDepartmentStats() {
+    return await this.request(API_ENDPOINTS.DASHBOARD.DEPARTMENTS);
+  }
 
-    exportData: async (params = {}) => {
-      const queryString = new URLSearchParams(params).toString();
-      const endpoint = queryString ? `${API_ENDPOINTS.DASHBOARD.EXPORT}?${queryString}` : API_ENDPOINTS.DASHBOARD.EXPORT;
-      return await this.request(endpoint);
-    },
-  };
+  async getPerformanceMetrics(params = {}) {
+    const backendParams = {
+      period: params.period || 'month'
+    };
+
+    const queryString = this.buildQueryString(backendParams);
+    const endpoint = queryString ? `${API_ENDPOINTS.DASHBOARD.PERFORMANCE}?${queryString}` : API_ENDPOINTS.DASHBOARD.PERFORMANCE;
+    return await this.request(endpoint);
+  }
+
+  async exportData(params = {}) {
+    const queryString = this.buildQueryString(params);
+    const endpoint = queryString ? `${API_ENDPOINTS.DASHBOARD.EXPORT}?${queryString}` : API_ENDPOINTS.DASHBOARD.EXPORT;
+    return await this.request(endpoint);
+  }
 
   // Utility methods
   async healthCheck() {
@@ -452,8 +510,6 @@ class ApiService {
     throw error;
   }
 }
-
-
 
 // Custom error class for API errors
 class ApiError extends Error {

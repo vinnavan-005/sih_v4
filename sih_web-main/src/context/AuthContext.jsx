@@ -5,6 +5,21 @@ const AuthContext = createContext();
 // API base URL - adjust this to match your backend
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+// Role mapping between frontend (UI) and backend (API)
+const FRONTEND_TO_BACKEND_ROLES = {
+  'Admin': 'admin',
+  'DepartmentStaff': 'staff',
+  'FieldSupervisor': 'supervisor',
+  'Citizen': 'citizen'
+};
+
+const BACKEND_TO_FRONTEND_ROLES = {
+  'admin': 'Admin',
+  'staff': 'DepartmentStaff',
+  'supervisor': 'FieldSupervisor',
+  'citizen': 'Citizen'
+};
+
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -17,6 +32,28 @@ export const AuthProvider = ({ children }) => {
   const [currentUser, setCurrentUser] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('token'));
+
+  // Helper function to process user data from backend
+  const processUserData = (userData) => {
+    if (!userData) return null;
+
+    return {
+      id: userData.id,
+      fullname: userData.full_name || userData.fullname,
+      email: userData.email,
+      role: BACKEND_TO_FRONTEND_ROLES[userData.role] || userData.role, // Convert backend role to frontend
+      backendRole: userData.role, // Keep original for API calls
+      department: userData.department,
+      phone: userData.phone,
+      created_at: userData.created_at,
+      loginTime: userData.loginTime || new Date().toISOString()
+    };
+  };
+
+  // Helper function to get backend role for API calls
+  const getBackendRole = (frontendRole) => {
+    return FRONTEND_TO_BACKEND_ROLES[frontendRole] || frontendRole;
+  };
 
   // Initialize auth state
   useEffect(() => {
@@ -37,8 +74,10 @@ export const AuthProvider = ({ children }) => {
           
           if (response.ok) {
             const data = await response.json();
-            if (data.valid) {
-              setCurrentUser(JSON.parse(savedUser));
+            if (data.valid && data.user) {
+              // Process the user data from token verification
+              const processedUser = processUserData(data.user);
+              setCurrentUser(processedUser);
               setToken(savedToken);
             } else {
               // Token is invalid, clear storage
@@ -72,18 +111,6 @@ export const AuthProvider = ({ children }) => {
     try {
       setIsLoading(true);
       
-      // Map frontend roles to backend roles
-      const roleMapping = {
-        'Admin': 'admin',
-        'DepartmentStaff': 'staff', 
-        'FieldSupervisor': 'supervisor'
-      };
-      
-      const backendRole = roleMapping[role];
-      if (!backendRole) {
-        return { success: false, error: 'Invalid role selected' };
-      }
-
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: {
@@ -98,42 +125,25 @@ export const AuthProvider = ({ children }) => {
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Check if user's role matches selected role
-        const userRole = data.user.role;
-        // Don't check role mismatch on login - just use what's in database
-        const frontendRoleMapping = {
-          'admin': 'Admin',
-          'staff': 'DepartmentStaff',
-          'supervisor': 'FieldSupervisor',
-          'citizen': 'Citizen'
-        };
+        // Process user data and handle role conversion
+        const processedUser = processUserData(data.user);
         
-        const frontendRole = frontendRoleMapping[userRole] || 'Citizen';
+        // Optional: Check if user's role matches selected role (if role selection is required)
+        if (role && processedUser.role !== role) {
+          return { 
+            success: false, 
+            error: `User role mismatch. Expected ${role}, but user is ${processedUser.role}` 
+          };
+        }
 
         // Store token and user info
         localStorage.setItem('token', data.access_token);
-        localStorage.setItem('currentUser', JSON.stringify({
-          id: data.user.id,
-          fullname: data.user.full_name,
-          email: data.user.email || email,
-          role: frontendRole, // Store frontend role format
-          department: data.user.department,
-          loginTime: new Date().toISOString()
-        }));
+        localStorage.setItem('currentUser', JSON.stringify(processedUser));
 
-        const userSession = {
-          id: data.user.id,
-          fullname: data.user.full_name,
-          email: data.user.email || email,
-          role: frontendRole,
-          department: data.user.department,
-          loginTime: new Date().toISOString()
-        };
-
-        setCurrentUser(userSession);
+        setCurrentUser(processedUser);
         setToken(data.access_token);
         
-        return { success: true, user: userSession };
+        return { success: true, user: processedUser };
       } else {
         return { 
           success: false, 
@@ -151,86 +161,39 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  // Updated AuthContext.jsx - Add this to your existing AuthContext.jsx file
-// Just replace the signup function with this updated version:
-
   const signup = async (userData) => {
     try {
       setIsLoading(true);
       
-      // Map frontend roles to backend roles
-      const roleMapping = {
-        'Admin': 'admin',
-        'DepartmentStaff': 'staff',
-        'FieldSupervisor': 'supervisor'
-      };
-      
-      const backendRole = roleMapping[userData.role];
-      if (!backendRole) {
-        return { success: false, error: 'Invalid role selected' };
-      }
-
-      // Step 1: Register the user (this creates auth user with default 'citizen' role)
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          email: userData.email.toLowerCase().trim(),
-          password: userData.password,
-          full_name: userData.fullname.trim(),
-          phone: userData.phone || null,
-          role: userData.role
+          ...userData,
+          email: userData.email.toLowerCase().trim()
         })
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Step 2: If user was created successfully and we have admin privileges, update the role
-        // For now, we'll store the intended role and let admin assign it later
-        // or you can implement admin auto-assignment logic here
-        
-        // Try to login immediately if possible (depends on your backend email verification setup)
-        if (data.access_token && data.access_token !== 'pending_confirmation') {
-          // User can login immediately, try to update role if we have permission
-          try {
-            const updateResponse = await fetch(`${API_BASE_URL}/api/users/${data.user.id}`, {
-              method: 'PUT',
-              headers: {
-                'Authorization': `Bearer ${data.access_token}`,
-                'Content-Type': 'application/json'
-              },
-              body: JSON.stringify({
-                role: backendRole,
-                // Add department logic here if needed
-                department: getDefaultDepartment(backendRole)
-              })
-            });
+        // Process user data
+        const processedUser = processUserData(data.user);
 
-            if (updateResponse.ok) {
-              // Role updated successfully
-              console.log('User role updated during registration');
-            } else {
-              console.log('Role will need to be assigned by administrator');
-            }
-          } catch (updateError) {
-            console.log('Role assignment will be handled by administrator');
-          }
-        }
+        // Store token and user info
+        localStorage.setItem('token', data.access_token);
+        localStorage.setItem('currentUser', JSON.stringify(processedUser));
+
+        setCurrentUser(processedUser);
+        setToken(data.access_token);
         
-        return { 
-          success: true, 
-          user: data.user,
-          message: data.access_token === 'pending_confirmation' 
-            ? 'Registration successful! Please check your email to confirm your account. Role assignment will be completed after email verification.'
-            : `Registration successful! Account created with ${userData.role} role.`
-        };
+        return { success: true, user: processedUser };
       } else {
         return { 
           success: false, 
-          error: data.detail || data.message || 'Registration failed' 
+          error: data.detail || data.message || 'Signup failed' 
         };
       }
     } catch (error) {
@@ -244,20 +207,10 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-// Helper function to assign default departments based on role
-  const getDefaultDepartment = (role) => {
-    const defaultDepartments = {
-      'admin': null, // Admins don't need departments
-      'staff': 'Public Works', // Default department for staff
-      'supervisor': 'Public Works' // Default department for supervisors
-    };
-    return defaultDepartments[role];
-  };
-
   const logout = async () => {
     try {
       if (token) {
-        // Call backend logout endpoint
+        // Call logout endpoint to invalidate token on server
         await fetch(`${API_BASE_URL}/api/auth/logout`, {
           method: 'POST',
           headers: {
@@ -268,8 +221,9 @@ export const AuthProvider = ({ children }) => {
       }
     } catch (error) {
       console.error('Logout error:', error);
+      // Continue with logout even if server call fails
     } finally {
-      // Clear local storage regardless of backend call success
+      // Always clear local storage
       localStorage.removeItem('token');
       localStorage.removeItem('currentUser');
       setCurrentUser(null);
@@ -277,52 +231,48 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
-  const updateProfile = async (updates) => {
+  const updateProfile = async (profileData) => {
     if (!currentUser || !token) {
       return { success: false, error: 'Not authenticated' };
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/users/${currentUser.id}`, {
+      const response = await fetch(`${API_BASE_URL}/api/users/${currentUser.id}`, {
         method: 'PUT',
         headers: {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          full_name: updates.fullname || updates.full_name,
-          phone: updates.phone,
-          department: updates.department
-        })
+        body: JSON.stringify(profileData)
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        const updatedUser = {
-          ...currentUser,
-          fullname: data.full_name,
-          phone: data.phone,
-          department: data.department
-        };
+        // Process and update user data
+        const processedUser = processUserData(data);
+        const updatedUser = { ...currentUser, ...processedUser };
         
-        setCurrentUser(updatedUser);
         localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+        setCurrentUser(updatedUser);
         
         return { success: true, user: updatedUser };
       } else {
         return { 
           success: false, 
-          error: data.detail || 'Profile update failed' 
+          error: data.detail || data.message || 'Profile update failed' 
         };
       }
     } catch (error) {
       console.error('Profile update error:', error);
-      return { success: false, error: 'Network error' };
+      return { 
+        success: false, 
+        error: 'Network error. Please check your connection.' 
+      };
     }
   };
 
-  // Permission helpers adapted for your backend roles
+  // Role checking functions
   const hasRole = (roles) => {
     if (!currentUser) return false;
     const roleArray = Array.isArray(roles) ? roles : [roles];
@@ -338,7 +288,9 @@ export const AuthProvider = ({ children }) => {
       'assign-tasks': ['Admin', 'DepartmentStaff'],
       'escalate-issues': ['Admin', 'DepartmentStaff'],
       'update-status': ['Admin', 'DepartmentStaff', 'FieldSupervisor'],
-      'view-analytics': ['Admin', 'DepartmentStaff', 'FieldSupervisor']
+      'view-analytics': ['Admin', 'DepartmentStaff', 'FieldSupervisor'],
+      'manage-assignments': ['Admin', 'DepartmentStaff', 'FieldSupervisor'],
+      'system-settings': ['Admin']
     };
     
     return permissions[permission]?.includes(currentUser.role) || false;
@@ -352,7 +304,7 @@ export const AuthProvider = ({ children }) => {
       return issue.department === currentUser.department;
     }
     if (currentUser.role === 'FieldSupervisor') {
-      return issue.assignedTo === currentUser.email;
+      return issue.assignedTo === currentUser.email || issue.assignedTo === currentUser.id;
     }
     
     return false;
@@ -384,6 +336,21 @@ export const AuthProvider = ({ children }) => {
     return response;
   };
 
+  // Get current user's backend role for API calls
+  const getUserBackendRole = () => {
+    if (!currentUser) return null;
+    return getBackendRole(currentUser.role);
+  };
+
+  // Check if user can access a specific route based on backend role requirements
+  const canAccessRoute = (requiredBackendRoles = []) => {
+    if (!currentUser) return false;
+    if (requiredBackendRoles.length === 0) return true;
+    
+    const userBackendRole = getUserBackendRole();
+    return requiredBackendRoles.includes(userBackendRole);
+  };
+
   const value = {
     currentUser,
     token,
@@ -395,7 +362,13 @@ export const AuthProvider = ({ children }) => {
     hasRole,
     hasPermission,
     canAccessIssue,
-    apiCall // Expose API helper
+    canAccessRoute,
+    getUserBackendRole,
+    getBackendRole,
+    apiCall,
+    // Expose role mappings for debugging
+    FRONTEND_TO_BACKEND_ROLES,
+    BACKEND_TO_FRONTEND_ROLES
   };
 
   return (

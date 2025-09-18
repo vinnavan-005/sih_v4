@@ -13,17 +13,18 @@ import {
   FileText,
   RefreshCw,
   UserPlus,
-  TrendingUp
+  TrendingUp,
+  Briefcase,
+  Eye,
+  Edit
 } from 'lucide-react';
 import apiService from '../../services/api';
 
 const StaffDashboard = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const [dashboardData, setDashboardData] = useState(null);
-  const [deptIssues, setDeptIssues] = useState([]);
-  const [assignments, setAssignments] = useState([]);
-  const [staffMembers, setStaffMembers] = useState([]);
+  const [myAssignments, setMyAssignments] = useState([]);
+  const [departmentIssues, setDepartmentIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [actionLoading, setActionLoading] = useState(null);
@@ -33,38 +34,23 @@ const StaffDashboard = () => {
       setLoading(true);
       setError(null);
       
-      // Fetch dashboard overview
-      const dashboardResponse = await apiService.getDashboardOverview();
+      // Fetch MY assignments (staff can access their own assignments)
+      const assignmentsResponse = await apiService.getMyAssignments({
+        per_page: 50
+      });
       
-      // Fetch department issues (filtered by backend based on user role)
+      // Fetch issues that are either unassigned or assigned to me
+      // Staff users can view issues in general issues list (based on your backend permissions)
       const issuesResponse = await apiService.getIssues({
-        department: currentUser?.department,
         per_page: 50
       });
       
-      // Fetch assignments for the department
-      const assignmentsResponse = await apiService.getAssignments({
-        department: currentUser?.department,
-        per_page: 50
-      });
-      
-      // Fetch staff members in the department
-      const staffResponse = await apiService.getStaffUsers(currentUser?.department);
-
-      if (dashboardResponse.success) {
-        setDashboardData(dashboardResponse);
+      if (assignmentsResponse.success) {
+        setMyAssignments(assignmentsResponse.assignments || []);
       }
       
       if (issuesResponse.success) {
-        setDeptIssues(issuesResponse.issues || []);
-      }
-      
-      if (assignmentsResponse.success) {
-        setAssignments(assignmentsResponse.assignments || []);
-      }
-      
-      if (Array.isArray(staffResponse)) {
-        setStaffMembers(staffResponse);
+        setDepartmentIssues(issuesResponse.issues || []);
       }
 
     } catch (err) {
@@ -82,71 +68,52 @@ const StaffDashboard = () => {
     const interval = setInterval(fetchDashboardData, 2 * 60 * 1000);
     
     return () => clearInterval(interval);
-  }, [currentUser?.department]);
+  }, []);
 
-  const handleAssignToStaff = async (issueId) => {
-    if (!staffMembers.length) {
-      alert('No staff members available for assignment');
-      return;
-    }
-
-    // Simple staff selection - in a real app, you'd want a proper modal
-    const staffList = staffMembers.map(s => `${s.full_name} (${s.email})`).join('\n');
-    const selectedStaff = prompt(`Select staff member by email:\n\n${staffList}\n\nEnter email:`);
-    
-    if (selectedStaff && selectedStaff.trim()) {
-      const staffMember = staffMembers.find(s => s.email === selectedStaff.trim());
-      if (!staffMember) {
-        alert('Staff member not found');
-        return;
-      }
-
-      setActionLoading(issueId);
-      try {
-        const result = await apiService.createAssignment({
-          issue_id: issueId,
-          staff_id: staffMember.id,
-          notes: `Assigned by ${currentUser.fullname}`
-        });
-
-        if (result.success || result.id) {
-          alert('Issue assigned successfully!');
-          fetchDashboardData(); // Refresh data
-        } else {
-          alert('Assignment failed: ' + (result.error || 'Unknown error'));
-        }
-      } catch (err) {
-        console.error('Assignment error:', err);
-        alert('Assignment failed: ' + err.message);
-      } finally {
-        setActionLoading(null);
-      }
-    }
-  };
-
-  const handleUpdateIssueStatus = async (issueId, newStatus) => {
-    setActionLoading(issueId);
+  const handleUpdateAssignmentStatus = async (assignmentId, newStatus) => {
+    setActionLoading(assignmentId);
     try {
-      const backendStatus = {
-        'In Progress': 'in_progress',
-        'Resolved': 'resolved'
-      }[newStatus];
-
-      const result = await apiService.updateIssue(issueId, {
-        status: backendStatus
+      const result = await apiService.updateAssignment(assignmentId, {
+        status: newStatus
       });
 
       if (result.success || result.id) {
-        alert(`Issue marked as ${newStatus}!`);
+        alert(`Assignment status updated to ${newStatus}!`);
         fetchDashboardData(); // Refresh data
       } else {
         alert('Status update failed: ' + (result.error || 'Unknown error'));
       }
     } catch (err) {
-      console.error('Status update error:', err);
+      console.error('Assignment status update error:', err);
       alert('Status update failed: ' + err.message);
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const handleAddUpdate = async (issueId) => {
+    const updateText = prompt('Enter your update for this issue:');
+    if (updateText && updateText.trim()) {
+      try {
+        setActionLoading(issueId);
+        const result = await apiService.createUpdate({
+          issue_id: issueId,
+          update_text: updateText.trim(),
+          status: 'info'
+        });
+
+        if (result.success || result.id) {
+          alert('Update added successfully!');
+          fetchDashboardData();
+        } else {
+          alert('Failed to add update: ' + (result.error || 'Unknown error'));
+        }
+      } catch (err) {
+        console.error('Update error:', err);
+        alert('Failed to add update: ' + err.message);
+      } finally {
+        setActionLoading(null);
+      }
     }
   };
 
@@ -182,13 +149,20 @@ const StaffDashboard = () => {
     );
   }
 
-  // Calculate department stats
-  const deptStats = {
-    total: deptIssues.length,
-    open: deptIssues.filter(i => i.status === 'pending').length,
-    inProgress: deptIssues.filter(i => i.status === 'in_progress').length,
-    resolved: deptIssues.filter(i => i.status === 'resolved').length,
-    overdue: deptIssues.filter(i => i.days_open > 3 && i.status !== 'resolved').length
+  // Calculate assignment stats
+  const assignmentStats = {
+    total: myAssignments.length,
+    assigned: myAssignments.filter(a => a.status === 'assigned').length,
+    inProgress: myAssignments.filter(a => a.status === 'in_progress').length,
+    completed: myAssignments.filter(a => a.status === 'completed').length
+  };
+
+  // Calculate issue stats (for issues visible to staff)
+  const issueStats = {
+    total: departmentIssues.length,
+    pending: departmentIssues.filter(i => i.status === 'pending').length,
+    inProgress: departmentIssues.filter(i => i.status === 'in_progress').length,
+    resolved: departmentIssues.filter(i => i.status === 'resolved').length
   };
 
   const StatCard = ({ title, value, icon: Icon, color, bgColor }) => (
@@ -202,6 +176,31 @@ const StaffDashboard = () => {
       </div>
     </div>
   );
+
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
+  };
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'assigned':
+        return 'bg-blue-100 text-blue-800';
+      case 'in_progress':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'completed':
+      case 'resolved':
+        return 'bg-green-100 text-green-800';
+      case 'pending':
+        return 'bg-red-100 text-red-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
 
   return (
     <div className="flex min-h-screen bg-gray-50">
@@ -229,142 +228,130 @@ const StaffDashboard = () => {
           </button>
         </header>
 
-        {/* Department Stats */}
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
+        {/* Stats Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatCard
-            title="Total Issues"
-            value={deptStats.total}
-            icon={FileText}
-            color="border-t-gray-500"
-            bgColor="bg-white"
-          />
-          <StatCard
-            title="Open"
-            value={deptStats.open}
-            icon={AlertTriangle}
-            color="border-t-red-500"
+            title="My Assignments"
+            value={assignmentStats.total}
+            icon={Briefcase}
+            color="border-t-blue-500 text-blue-500"
             bgColor="bg-white"
           />
           <StatCard
             title="In Progress"
-            value={deptStats.inProgress}
+            value={assignmentStats.inProgress}
             icon={Clock}
-            color="border-t-yellow-500"
+            color="border-t-yellow-500 text-yellow-500"
             bgColor="bg-white"
           />
           <StatCard
-            title="Resolved"
-            value={deptStats.resolved}
+            title="Completed"
+            value={assignmentStats.completed}
             icon={CheckCircle}
-            color="border-t-green-500"
+            color="border-t-green-500 text-green-500"
             bgColor="bg-white"
           />
           <StatCard
-            title="Overdue"
-            value={deptStats.overdue}
-            icon={AlertTriangle}
-            color="border-t-purple-500"
+            title="Total Issues"
+            value={issueStats.total}
+            icon={FileText}
+            color="border-t-purple-500 text-purple-500"
             bgColor="bg-white"
           />
-        </section>
+        </div>
 
-        {/* Department Issues Table */}
-        <section className="bg-white rounded-xl shadow-sm mb-8 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center">
-            <h2 className="text-xl font-semibold text-gray-900">Department Issues</h2>
-            <span className="text-sm text-gray-500">
-              {deptIssues.length} total issues
-            </span>
+        {/* My Assignments Section */}
+        <section className="bg-white rounded-xl p-6 shadow-sm mb-8">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+              <Briefcase className="h-6 w-6 text-blue-500 mr-2" />
+              My Assignments ({myAssignments.length})
+            </h2>
+            <button
+              onClick={() => navigate('/assignments')}
+              className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+            >
+              View All →
+            </button>
           </div>
           
           <div className="overflow-x-auto">
-            {deptIssues.length === 0 ? (
-              <div className="text-center py-12">
-                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-                <p className="text-gray-600">No issues in your department</p>
+            {myAssignments.length === 0 ? (
+              <div className="text-center py-8">
+                <Briefcase className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">No assignments yet</p>
               </div>
             ) : (
-              <table className="w-full">
+              <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Issue
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Category
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Days Open
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Assignments
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Actions
-                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Issue</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Assigned</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {deptIssues.map((issue) => (
-                    <tr key={issue.id} className="hover:bg-gray-50">
+                  {myAssignments.slice(0, 5).map((assignment) => (
+                    <tr key={assignment.id} className="hover:bg-gray-50">
                       <td className="px-6 py-4">
-                        <div className="text-sm font-medium text-gray-900 truncate max-w-xs">
-                          {issue.title}
-                        </div>
-                        <div className="text-xs text-gray-500">
-                          #{issue.id}
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-900">
+                            #{assignment.issue_id} - {assignment.issue_title || 'Issue Title'}
+                          </div>
+                          <div className="text-gray-500 text-xs">
+                            {assignment.issue_category || 'Category'} • {assignment.notes}
+                          </div>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className="text-sm text-gray-900 capitalize">
-                          {issue.category}
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(assignment.status)}`}>
+                          {assignment.status?.replace('_', ' ')}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          issue.status === 'resolved' 
-                            ? 'bg-green-100 text-green-800'
-                            : issue.status === 'in_progress'
-                            ? 'bg-yellow-100 text-yellow-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}>
-                          {issue.status?.replace('_', ' ')}
-                        </span>
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        {formatDate(assignment.created_at)}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {issue.days_open || 0} days
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {issue.assignment_count || 0} assigned
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                      <td className="px-6 py-4 text-sm space-x-2">
                         <button
-                          onClick={() => handleAssignToStaff(issue.id)}
-                          disabled={actionLoading === issue.id}
-                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors disabled:opacity-50 inline-flex items-center"
+                          onClick={() => navigate(`/issue-details/${assignment.issue_id}`)}
+                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors inline-flex items-center"
                         >
-                          <UserPlus className="h-3 w-3 mr-1" />
-                          {actionLoading === issue.id ? 'Assigning...' : 'Assign'}
+                          <Eye className="h-3 w-3 mr-1" />
+                          View
                         </button>
-                        <button
-                          onClick={() => handleUpdateIssueStatus(issue.id, 'In Progress')}
-                          disabled={actionLoading === issue.id || issue.status === 'in_progress'}
-                          className="bg-yellow-600 text-white px-3 py-1 rounded text-xs hover:bg-yellow-700 transition-colors disabled:opacity-50 inline-flex items-center"
-                        >
-                          <Play className="h-3 w-3 mr-1" />
-                          Progress
-                        </button>
-                        <button
-                          onClick={() => handleUpdateIssueStatus(issue.id, 'Resolved')}
-                          disabled={actionLoading === issue.id || issue.status === 'resolved'}
-                          className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 transition-colors disabled:opacity-50 inline-flex items-center"
-                        >
-                          <Check className="h-3 w-3 mr-1" />
-                          Resolve
-                        </button>
+                        {assignment.status !== 'completed' && (
+                          <>
+                            {assignment.status === 'assigned' && (
+                              <button
+                                onClick={() => handleUpdateAssignmentStatus(assignment.id, 'in_progress')}
+                                disabled={actionLoading === assignment.id}
+                                className="bg-yellow-600 text-white px-3 py-1 rounded text-xs hover:bg-yellow-700 transition-colors disabled:opacity-50 inline-flex items-center"
+                              >
+                                <Play className="h-3 w-3 mr-1" />
+                                Start Work
+                              </button>
+                            )}
+                            {assignment.status === 'in_progress' && (
+                              <button
+                                onClick={() => handleUpdateAssignmentStatus(assignment.id, 'completed')}
+                                disabled={actionLoading === assignment.id}
+                                className="bg-green-600 text-white px-3 py-1 rounded text-xs hover:bg-green-700 transition-colors disabled:opacity-50 inline-flex items-center"
+                              >
+                                <Check className="h-3 w-3 mr-1" />
+                                Complete
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleAddUpdate(assignment.issue_id)}
+                              disabled={actionLoading === assignment.issue_id}
+                              className="bg-indigo-600 text-white px-3 py-1 rounded text-xs hover:bg-indigo-700 transition-colors disabled:opacity-50 inline-flex items-center"
+                            >
+                              <Edit className="h-3 w-3 mr-1" />
+                              Add Update
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -374,81 +361,98 @@ const StaffDashboard = () => {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Staff Members */}
-          <section className="bg-white rounded-xl p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-              <Users className="h-6 w-6 text-blue-500 mr-2" />
-              Department Staff ({staffMembers.length})
+        {/* Department Issues Overview */}
+        <section className="bg-white rounded-xl p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-xl font-semibold text-gray-900 flex items-center">
+              <FileText className="h-6 w-6 text-purple-500 mr-2" />
+              Recent Issues ({departmentIssues.length})
             </h2>
-            
-            {staffMembers.length === 0 ? (
-              <p className="text-gray-600">No staff members in this department.</p>
-            ) : (
-              <div className="space-y-3">
-                {staffMembers.map((staff) => {
-                  const staffAssignments = assignments.filter(a => a.staff_id === staff.id);
-                  const activeAssignments = staffAssignments.filter(a => a.status !== 'completed');
-                  
-                  return (
-                    <div key={staff.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
-                      <div>
-                        <span className="font-medium text-gray-900">{staff.full_name}</span>
-                        <p className="text-sm text-gray-600">{staff.email}</p>
-                      </div>
-                      <div className="text-right">
-                        <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-medium rounded-full">
-                          {activeAssignments.length} active
-                        </span>
-                        <p className="text-xs text-gray-500 mt-1">
-                          {staffAssignments.length} total
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </section>
+            <button
+              onClick={() => navigate('/issues')}
+              className="text-purple-600 hover:text-purple-800 text-sm font-medium"
+            >
+              View All Issues →
+            </button>
+          </div>
 
-          {/* Recent Activity */}
-          <section className="bg-white rounded-xl p-6 shadow-sm">
-            <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-              <TrendingUp className="h-6 w-6 text-green-500 mr-2" />
-              Department Performance
-            </h2>
-            
-            <div className="space-y-4">
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Resolution Rate</span>
-                <span className="font-semibold text-gray-900">
-                  {deptStats.total > 0 ? Math.round((deptStats.resolved / deptStats.total) * 100) : 0}%
-                </span>
-              </div>
-              
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Active Assignments</span>
-                <span className="font-semibold text-gray-900">
-                  {assignments.filter(a => a.status !== 'completed').length}
-                </span>
-              </div>
-              
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Overdue Issues</span>
-                <span className={`font-semibold ${deptStats.overdue > 0 ? 'text-red-600' : 'text-green-600'}`}>
-                  {deptStats.overdue}
-                </span>
-              </div>
-              
-              <div className="flex justify-between items-center">
-                <span className="text-gray-600">Total Upvotes</span>
-                <span className="font-semibold text-gray-900">
-                  {deptIssues.reduce((sum, issue) => sum + (issue.upvotes || 0), 0)}
-                </span>
-              </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div className="text-center p-4 bg-red-50 rounded-lg">
+              <div className="text-2xl font-bold text-red-600">{issueStats.pending}</div>
+              <div className="text-sm text-gray-600">Pending</div>
             </div>
-          </section>
-        </div>
+            <div className="text-center p-4 bg-yellow-50 rounded-lg">
+              <div className="text-2xl font-bold text-yellow-600">{issueStats.inProgress}</div>
+              <div className="text-sm text-gray-600">In Progress</div>
+            </div>
+            <div className="text-center p-4 bg-green-50 rounded-lg">
+              <div className="text-2xl font-bold text-green-600">{issueStats.resolved}</div>
+              <div className="text-sm text-gray-600">Resolved</div>
+            </div>
+            <div className="text-center p-4 bg-blue-50 rounded-lg">
+              <div className="text-2xl font-bold text-blue-600">{issueStats.total}</div>
+              <div className="text-sm text-gray-600">Total Issues</div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            {departmentIssues.length === 0 ? (
+              <div className="text-center py-8">
+                <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <p className="text-gray-600">No issues available</p>
+              </div>
+            ) : (
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Issue</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {departmentIssues.slice(0, 10).map((issue) => (
+                    <tr key={issue.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4">
+                        <div className="text-sm">
+                          <div className="font-medium text-gray-900">#{issue.id} - {issue.title}</div>
+                          <div className="text-gray-500 text-xs">{issue.category}</div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(issue.status)}`}>
+                          {issue.status?.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4">
+                        <span className={`text-xs font-medium ${
+                          issue.priority === 'high' ? 'text-red-600' :
+                          issue.priority === 'medium' ? 'text-yellow-600' : 'text-green-600'
+                        }`}>
+                          {issue.priority || 'Medium'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-sm text-gray-900">
+                        {formatDate(issue.created_at)}
+                      </td>
+                      <td className="px-6 py-4 text-sm">
+                        <button
+                          onClick={() => navigate(`/issue-details/${issue.id}`)}
+                          className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors inline-flex items-center"
+                        >
+                          <Eye className="h-3 w-3 mr-1" />
+                          View Details
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </section>
       </main>
     </div>
   );
