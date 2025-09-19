@@ -1,296 +1,295 @@
 import React from 'react';
-import { AlertTriangle, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { AlertTriangle, RefreshCw, ArrowLeft, Home, Wifi, WifiOff } from 'lucide-react';
 
+// Basic Loading Spinner Component
 const LoadingSpinner = ({ 
-  size = 'default', 
+  size = 'medium', 
   text = 'Loading...', 
-  color = 'blue',
-  showText = true,
-  inline = false 
+  subText = '',
+  className = '' 
 }) => {
   const sizeClasses = {
     small: 'h-4 w-4',
-    default: 'h-8 w-8',
+    medium: 'h-8 w-8',
     large: 'h-12 w-12',
-    xlarge: 'h-16 w-16'
+    xl: 'h-16 w-16'
   };
 
   const containerClasses = {
     small: 'p-2',
-    default: 'p-4',
+    medium: 'p-4',
     large: 'p-8',
-    xlarge: 'p-12'
+    xl: 'p-12'
   };
-
-  const colorClasses = {
-    blue: 'border-blue-600',
-    green: 'border-green-600',
-    red: 'border-red-600',
-    yellow: 'border-yellow-600',
-    purple: 'border-purple-600',
-    gray: 'border-gray-600'
-  };
-
-  const textSizeClasses = {
-    small: 'text-xs',
-    default: 'text-sm',
-    large: 'text-base',
-    xlarge: 'text-lg'
-  };
-
-  if (inline) {
-    return (
-      <div className="flex items-center space-x-2">
-        <div className={`animate-spin rounded-full border-2 border-gray-300 ${colorClasses[color]} ${sizeClasses[size]}`}></div>
-        {showText && (
-          <span className={`text-gray-600 ${textSizeClasses[size]}`}>{text}</span>
-        )}
-      </div>
-    );
-  }
 
   return (
-    <div className={`flex flex-col items-center justify-center ${containerClasses[size]}`}>
-      <div className={`animate-spin rounded-full border-2 border-gray-300 ${colorClasses[color]} ${sizeClasses[size]}`}></div>
-      {showText && text && (
-        <p className={`mt-3 text-gray-600 ${textSizeClasses[size]} text-center max-w-xs`}>{text}</p>
-      )}
-    </div>
-  );
-};
-
-// Full page loading component
-export const PageLoader = ({ 
-  text = 'Loading...', 
-  subText = null,
-  showLogo = true 
-}) => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-50">
-    <div className="text-center max-w-md mx-auto px-4">
-      {showLogo && (
-        <div className="mb-8">
-          <div className="mx-auto w-16 h-16 bg-blue-600 rounded-xl flex items-center justify-center mb-4">
-            <span className="text-white text-2xl font-bold">CC</span>
-          </div>
-          <h2 className="text-xl font-semibold text-gray-900">CivicConnect</h2>
+    <div className={`flex items-center justify-center ${containerClasses[size]} ${className}`}>
+      <div className="text-center">
+        <div className="flex justify-center mb-4">
+          <div className={`animate-spin rounded-full border-4 border-gray-200 border-t-blue-600 ${sizeClasses[size]}`} />
         </div>
-      )}
-      
-      <div className="animate-spin rounded-full h-16 w-16 border-2 border-gray-300 border-t-blue-600 mx-auto mb-6"></div>
-      <p className="text-lg text-gray-700 mb-2">{text}</p>
-      {subText && (
-        <p className="text-sm text-gray-500">{subText}</p>
-      )}
-    </div>
-  </div>
-);
-
-// Overlay loading component
-export const LoadingOverlay = ({ 
-  text = 'Processing...', 
-  show = true,
-  onCancel = null,
-  cancelText = 'Cancel'
-}) => {
-  if (!show) return null;
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg p-8 text-center shadow-xl max-w-sm mx-4">
-        <div className="animate-spin rounded-full h-12 w-12 border-2 border-gray-300 border-t-blue-600 mx-auto mb-4"></div>
-        <p className="text-gray-700 mb-4">{text}</p>
-        {onCancel && (
-          <button
-            onClick={onCancel}
-            className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 transition-colors"
-          >
-            {cancelText}
-          </button>
+        {text && (
+          <p className="text-gray-600 font-medium">{text}</p>
+        )}
+        {subText && (
+          <p className="text-gray-500 text-sm mt-1">{subText}</p>
         )}
       </div>
     </div>
   );
 };
 
-// Error state component
+// Page-level loading component
+export const PageLoader = ({ 
+  text = 'Loading page...', 
+  subText = '', 
+  showLogo = true 
+}) => {
+  return (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="text-center">
+        {showLogo && (
+          <div className="mb-8">
+            <div className="h-16 w-16 bg-blue-600 rounded-lg flex items-center justify-center mx-auto mb-4">
+              <span className="text-white text-xl font-bold">CC</span>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">Civic Connect</h1>
+          </div>
+        )}
+        
+        <div className="flex justify-center mb-6">
+          <div className="animate-spin rounded-full h-12 w-12 border-4 border-gray-200 border-t-blue-600" />
+        </div>
+        
+        <p className="text-lg text-gray-600 font-medium mb-2">{text}</p>
+        {subText && (
+          <p className="text-gray-500">{subText}</p>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// Error State Component
 export const ErrorState = ({ 
   title = 'Something went wrong',
-  message = 'Please try again later',
-  onRetry = null,
-  onGoBack = null,
-  retryText = 'Try Again',
-  backText = 'Go Back',
-  showIcon = true
-}) => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-    <div className="text-center max-w-md mx-auto">
-      {showIcon && (
-        <AlertTriangle className="h-16 w-16 text-red-500 mx-auto mb-6" />
-      )}
-      <h2 className="text-2xl font-bold text-gray-900 mb-4">{title}</h2>
-      <p className="text-gray-600 mb-8">{message}</p>
-      
-      <div className="space-y-3">
-        {onRetry && (
-          <button
-            onClick={onRetry}
-            className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center"
-          >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            {retryText}
-          </button>
-        )}
-        
-        {onGoBack && (
-          <button
-            onClick={onGoBack}
-            className="w-full bg-gray-600 text-white px-6 py-3 rounded-lg hover:bg-gray-700 transition-colors font-medium"
-          >
-            {backText}
-          </button>
-        )}
-      </div>
-    </div>
-  </div>
-);
-
-// Network error component
-export const NetworkError = ({ 
-  onRetry = null,
-  onOfflineMode = null 
-}) => (
-  <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-    <div className="text-center max-w-md mx-auto">
-      <WifiOff className="h-16 w-16 text-red-500 mx-auto mb-6" />
-      <h2 className="text-2xl font-bold text-gray-900 mb-4">Connection Problem</h2>
-      <p className="text-gray-600 mb-8">
-        Unable to connect to the server. Please check your internet connection and try again.
-      </p>
-      
-      <div className="space-y-3">
-        {onRetry && (
-          <button
-            onClick={onRetry}
-            className="w-full bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium flex items-center justify-center"
-          >
-            <Wifi className="h-4 w-4 mr-2" />
-            Retry Connection
-          </button>
-        )}
-        
-        {onOfflineMode && (
-          <button
-            onClick={onOfflineMode}
-            className="w-full bg-gray-600 text-white px-6 py-3 rounded-lg hover:bg-gray-700 transition-colors font-medium"
-          >
-            Continue Offline
-          </button>
-        )}
-      </div>
-    </div>
-  </div>
-);
-
-// Loading skeleton for lists
-export const ListSkeleton = ({ items = 5 }) => (
-  <div className="space-y-4 animate-pulse">
-    {Array.from({ length: items }).map((_, index) => (
-      <div key={index} className="bg-white rounded-lg p-4 shadow-sm">
-        <div className="flex items-center space-x-4">
-          <div className="rounded-full bg-gray-300 h-10 w-10"></div>
-          <div className="flex-1 space-y-2">
-            <div className="h-4 bg-gray-300 rounded w-3/4"></div>
-            <div className="h-3 bg-gray-200 rounded w-1/2"></div>
-          </div>
-          <div className="h-8 bg-gray-300 rounded w-20"></div>
-        </div>
-      </div>
-    ))}
-  </div>
-);
-
-// Loading skeleton for cards
-export const CardSkeleton = ({ cards = 4 }) => (
-  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 animate-pulse">
-    {Array.from({ length: cards }).map((_, index) => (
-      <div key={index} className="bg-white rounded-xl p-6 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="space-y-2">
-            <div className="h-3 bg-gray-300 rounded w-20"></div>
-            <div className="h-8 bg-gray-300 rounded w-16"></div>
-          </div>
-          <div className="h-8 w-8 bg-gray-300 rounded"></div>
-        </div>
-      </div>
-    ))}
-  </div>
-);
-
-// Data loading state
-export const DataLoader = ({ 
-  loading = false,
-  error = null,
-  data = null,
-  onRetry = null,
-  loadingComponent = null,
-  errorComponent = null,
-  emptyComponent = null,
-  children
+  message = 'An unexpected error occurred',
+  onRetry,
+  onGoBack,
+  onGoHome,
+  showIcon = true,
+  type = 'error' // error, network, permission, notfound
 }) => {
-  if (loading) {
-    return loadingComponent || <LoadingSpinner text="Loading data..." />;
-  }
+  const getIcon = () => {
+    switch (type) {
+      case 'network':
+        return <WifiOff className="h-12 w-12 text-red-500" />;
+      case 'permission':
+        return <AlertTriangle className="h-12 w-12 text-yellow-500" />;
+      case 'notfound':
+        return <AlertTriangle className="h-12 w-12 text-gray-500" />;
+      default:
+        return <AlertTriangle className="h-12 w-12 text-red-500" />;
+    }
+  };
 
-  if (error) {
-    return errorComponent || (
-      <ErrorState
-        title="Failed to load data"
-        message={error.message || error}
-        onRetry={onRetry}
-      />
-    );
-  }
-
-  if (!data || (Array.isArray(data) && data.length === 0)) {
-    return emptyComponent || (
-      <div className="text-center py-12">
-        <div className="text-gray-500">No data available</div>
-      </div>
-    );
-  }
-
-  return children;
-};
-
-// Button with loading state
-export const LoadingButton = ({ 
-  loading = false,
-  disabled = false,
-  children,
-  loadingText = 'Loading...',
-  className = '',
-  size = 'default',
-  ...props
-}) => {
-  const baseClasses = 'inline-flex items-center justify-center font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed';
-  
-  const sizeClasses = {
-    small: 'px-3 py-1.5 text-sm rounded-md',
-    default: 'px-4 py-2 text-sm rounded-md',
-    large: 'px-6 py-3 text-base rounded-lg'
+  const getColorClasses = () => {
+    switch (type) {
+      case 'network':
+        return 'text-red-600';
+      case 'permission':
+        return 'text-yellow-600';
+      case 'notfound':
+        return 'text-gray-600';
+      default:
+        return 'text-red-600';
+    }
   };
 
   return (
-    <button
-      className={`${baseClasses} ${sizeClasses[size]} ${className}`}
-      disabled={loading || disabled}
-      {...props}
-    >
-      {loading && (
-        <div className="animate-spin rounded-full h-4 w-4 border-2 border-transparent border-t-current mr-2"></div>
+    <div className="flex items-center justify-center p-8">
+      <div className="text-center max-w-md">
+        {showIcon && (
+          <div className="flex justify-center mb-4">
+            {getIcon()}
+          </div>
+        )}
+        
+        <h3 className={`text-lg font-medium mb-2 ${getColorClasses()}`}>
+          {title}
+        </h3>
+        
+        <p className="text-gray-600 mb-6">
+          {message}
+        </p>
+        
+        <div className="flex flex-col sm:flex-row gap-3 justify-center">
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Try Again
+            </button>
+          )}
+          
+          {onGoBack && (
+            <button
+              onClick={onGoBack}
+              className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Go Back
+            </button>
+          )}
+          
+          {onGoHome && (
+            <button
+              onClick={onGoHome}
+              className="inline-flex items-center px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 transition-colors"
+            >
+              <Home className="h-4 w-4 mr-2" />
+              Home
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Network Status Component
+export const NetworkStatus = ({ isOnline = true }) => {
+  if (isOnline) return null;
+
+  return (
+    <div className="fixed top-0 left-0 right-0 bg-red-600 text-white px-4 py-2 text-center text-sm z-50">
+      <div className="flex items-center justify-center">
+        <WifiOff className="h-4 w-4 mr-2" />
+        No internet connection. Some features may not work properly.
+      </div>
+    </div>
+  );
+};
+
+// Skeleton Loader Components
+export const SkeletonCard = ({ className = '' }) => (
+  <div className={`animate-pulse bg-gray-200 rounded-lg ${className}`} />
+);
+
+export const SkeletonText = ({ lines = 1, className = '' }) => (
+  <div className={`space-y-2 ${className}`}>
+    {Array.from({ length: lines }).map((_, i) => (
+      <div
+        key={i}
+        className={`animate-pulse bg-gray-200 rounded ${
+          i === lines - 1 ? 'w-3/4' : 'w-full'
+        } h-4`}
+      />
+    ))}
+  </div>
+);
+
+export const SkeletonTable = ({ rows = 5, columns = 4 }) => (
+  <div className="animate-pulse">
+    {/* Table Header */}
+    <div className="grid gap-4 mb-4" style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}>
+      {Array.from({ length: columns }).map((_, i) => (
+        <div key={i} className="h-4 bg-gray-300 rounded" />
+      ))}
+    </div>
+    
+    {/* Table Rows */}
+    {Array.from({ length: rows }).map((_, rowIndex) => (
+      <div key={rowIndex} className="grid gap-4 mb-3" style={{ gridTemplateColumns: `repeat(${columns}, 1fr)` }}>
+        {Array.from({ length: columns }).map((_, colIndex) => (
+          <div key={colIndex} className="h-4 bg-gray-200 rounded" />
+        ))}
+      </div>
+    ))}
+  </div>
+);
+
+// Full Page Skeleton
+export const PageSkeleton = () => (
+  <div className="min-h-screen bg-gray-50 animate-pulse">
+    {/* Header Skeleton */}
+    <div className="bg-white shadow-sm p-4">
+      <div className="flex justify-between items-center">
+        <div className="h-6 bg-gray-200 rounded w-48" />
+        <div className="flex space-x-3">
+          <div className="h-8 bg-gray-200 rounded w-24" />
+          <div className="h-8 bg-gray-200 rounded w-32" />
+        </div>
+      </div>
+    </div>
+    
+    {/* Content Skeleton */}
+    <div className="max-w-7xl mx-auto px-4 py-8">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <SkeletonCard key={i} className="h-24" />
+        ))}
+      </div>
+      
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        <SkeletonCard className="h-64" />
+        <SkeletonCard className="h-64" />
+      </div>
+      
+      {/* Table */}
+      <div className="bg-white rounded-lg p-6">
+        <SkeletonTable />
+      </div>
+    </div>
+  </div>
+);
+
+// Inline Loading Component (for buttons, etc.)
+export const InlineLoader = ({ size = 'small' }) => {
+  const sizeClasses = {
+    small: 'h-3 w-3',
+    medium: 'h-4 w-4',
+    large: 'h-5 w-5'
+  };
+
+  return (
+    <div className={`animate-spin rounded-full border-2 border-current border-t-transparent ${sizeClasses[size]}`} />
+  );
+};
+
+// Connection Status Component
+export const ConnectionStatus = ({ 
+  isConnected = true, 
+  isLoading = false,
+  lastUpdated = null 
+}) => {
+  if (isLoading) {
+    return (
+      <div className="flex items-center text-sm text-gray-500">
+        <InlineLoader size="small" />
+        <span className="ml-2">Connecting...</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center text-sm">
+      <div className={`h-2 w-2 rounded-full mr-2 ${
+        isConnected ? 'bg-green-500' : 'bg-red-500'
+      }`} />
+      <span className={isConnected ? 'text-green-600' : 'text-red-600'}>
+        {isConnected ? 'Connected' : 'Disconnected'}
+      </span>
+      {lastUpdated && isConnected && (
+        <span className="text-gray-500 ml-2">
+          • Last updated {new Date(lastUpdated).toLocaleTimeString()}
+        </span>
       )}
-      {loading ? loadingText : children}
-    </button>
+    </div>
   );
 };
 

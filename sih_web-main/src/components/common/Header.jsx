@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from "../../context/AuthContext";
-import { LogOut, User, Bell, Settings, Menu, X } from 'lucide-react';
-import { ROLES, getDashboardRoute } from '../../utils/constants';
+import { LogOut, User, Bell, Settings, Menu, X, Home } from 'lucide-react';
+import { ROLES, getDashboardRoute, getRoleName } from '../../utils/constants';
 
 const Header = ({ title, showUserInfo = true, showNotifications = true }) => {
   const navigate = useNavigate();
@@ -26,11 +26,14 @@ const Header = ({ title, showUserInfo = true, showNotifications = true }) => {
     // FIXED: Use standardized roles and helper function
     const dashboardPath = getDashboardRoute(currentUser?.role);
     navigate(dashboardPath);
+    setShowDropdown(false);
+    setShowMobileMenu(false);
   };
 
   const goToProfile = () => {
     navigate('/profile');
     setShowDropdown(false);
+    setShowMobileMenu(false);
   };
 
   const goToSettings = () => {
@@ -41,12 +44,55 @@ const Header = ({ title, showUserInfo = true, showNotifications = true }) => {
       navigate('/profile');
     }
     setShowDropdown(false);
+    setShowMobileMenu(false);
+  };
+
+  const navigateToPage = (path) => {
+    navigate(path);
+    setShowMobileMenu(false);
   };
 
   // Don't show header on login/signup pages
   if (location.pathname === '/login' || location.pathname === '/signup') {
     return null;
   }
+
+  // Navigation items based on user role - FIXED
+  const getNavigationItems = () => {
+    if (!currentUser) return [];
+
+    const baseItems = [
+      { name: 'Dashboard', path: getDashboardRoute(currentUser.role), icon: Home },
+      { name: 'Issues', path: '/issues', icon: Bell },
+    ];
+
+    // Add role-specific items
+    if (currentUser.role === ROLES.ADMIN) {
+      return [
+        ...baseItems,
+        { name: 'Analytics', path: '/analytics', icon: Settings },
+        { name: 'Task Assignment', path: '/task-assignment', icon: User },
+        { name: 'Escalation', path: '/escalation', icon: Bell },
+        { name: 'Settings', path: '/settings', icon: Settings },
+      ];
+    } else if (currentUser.role === ROLES.STAFF) {
+      return [
+        ...baseItems,
+        { name: 'Analytics', path: '/analytics', icon: Settings },
+        { name: 'Task Assignment', path: '/task-assignment', icon: User },
+        { name: 'Escalation', path: '/escalation', icon: Bell },
+      ];
+    } else if (currentUser.role === ROLES.SUPERVISOR) {
+      return [
+        ...baseItems,
+        { name: 'Analytics', path: '/analytics', icon: Settings },
+      ];
+    }
+
+    return baseItems;
+  };
+
+  const navigationItems = getNavigationItems();
 
   return (
     <header className="bg-slate-800 text-white shadow-lg relative z-40">
@@ -62,150 +108,157 @@ const Header = ({ title, showUserInfo = true, showNotifications = true }) => {
               {showMobileMenu ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
             </button>
 
-            {/* Title */}
-            <div>
-              <h1 
-                className="text-xl font-bold cursor-pointer hover:text-blue-300 transition-colors"
+            {/* Logo/Title */}
+            <div className="flex items-center">
+              <button 
                 onClick={goToDashboard}
+                className="text-xl font-bold hover:text-blue-300 transition-colors"
               >
-                {title || 'Civic Connect'}
-              </h1>
-              {currentUser && (
-                <p className="text-xs text-slate-400">
-                  {currentUser.role === ROLES.ADMIN && 'Administrator Panel'}
-                  {currentUser.role === ROLES.STAFF && 'Staff Dashboard'}
-                  {currentUser.role === ROLES.SUPERVISOR && 'Supervisor Panel'}
-                  {currentUser.role === ROLES.CITIZEN && 'Citizen Portal'}
-                </p>
+                Civic Connect
+              </button>
+              {title && (
+                <span className="ml-4 text-lg text-gray-300 hidden sm:block">
+                  | {title}
+                </span>
               )}
             </div>
           </div>
 
-          {/* Right side - User info and actions */}
-          {showUserInfo && currentUser && (
-            <div className="flex items-center space-x-4">
-              {/* Notifications */}
-              {showNotifications && (
-                <button className="p-2 rounded-md hover:bg-slate-700 transition-colors relative">
-                  <Bell className="h-5 w-5" />
-                  {/* Notification badge */}
-                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
-                    3
-                  </span>
-                </button>
-              )}
+          {/* Desktop Navigation */}
+          <nav className="hidden lg:flex items-center space-x-6">
+            {navigationItems.map((item) => (
+              <button
+                key={item.name}
+                onClick={() => navigateToPage(item.path)}
+                className={`flex items-center px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  location.pathname === item.path
+                    ? 'bg-slate-700 text-blue-300'
+                    : 'hover:bg-slate-700 hover:text-blue-300'
+                }`}
+              >
+                <item.icon className="h-4 w-4 mr-2" />
+                {item.name}
+              </button>
+            ))}
+          </nav>
 
-              {/* User dropdown */}
+          {/* Right side - User info and actions */}
+          <div className="flex items-center space-x-4">
+            {/* Notifications */}
+            {showNotifications && (
+              <button className="p-2 rounded-md hover:bg-slate-700 transition-colors relative">
+                <Bell className="h-5 w-5" />
+                <span className="absolute -top-1 -right-1 h-4 w-4 bg-red-500 rounded-full text-xs flex items-center justify-center">
+                  3
+                </span>
+              </button>
+            )}
+
+            {/* User menu */}
+            {showUserInfo && currentUser && (
               <div className="relative">
                 <button
                   onClick={() => setShowDropdown(!showDropdown)}
-                  className="flex items-center space-x-2 p-2 rounded-md hover:bg-slate-700 transition-colors"
+                  className="flex items-center space-x-3 p-2 rounded-md hover:bg-slate-700 transition-colors"
                 >
-                  <User className="h-5 w-5" />
-                  <span className="hidden md:inline text-sm">
-                    {currentUser.fullname || 'User'}
-                  </span>
+                  <div className="text-right hidden sm:block">
+                    <div className="text-sm font-medium">{currentUser.fullname || currentUser.email}</div>
+                    <div className="text-xs text-gray-400">{getRoleName(currentUser.role)}</div>
+                  </div>
+                  <div className="h-8 w-8 bg-blue-600 rounded-full flex items-center justify-center">
+                    <User className="h-5 w-5" />
+                  </div>
                 </button>
 
                 {/* Dropdown menu */}
                 {showDropdown && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
-                    <div className="px-4 py-2 border-b border-gray-200">
-                      <p className="text-sm font-medium text-gray-900">
-                        {currentUser.fullname}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        {currentUser.email}
-                      </p>
-                      <p className="text-xs text-blue-600 font-medium mt-1">
-                        {currentUser.role === ROLES.ADMIN && 'Administrator'}
-                        {currentUser.role === ROLES.STAFF && 'Department Staff'}
-                        {currentUser.role === ROLES.SUPERVISOR && 'Field Supervisor'}
-                        {currentUser.role === ROLES.CITIZEN && 'Citizen'}
-                      </p>
-                    </div>
-                    
-                    <button
-                      onClick={goToDashboard}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                    >
-                      <User className="h-4 w-4 mr-2" />
-                      Dashboard
-                    </button>
-                    
+                  <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-2 z-50">
                     <button
                       onClick={goToProfile}
-                      className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
+                      className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
                     >
                       <User className="h-4 w-4 mr-2" />
                       Profile
                     </button>
-
-                    {/* Settings only for admin */}
-                    {currentUser.role === ROLES.ADMIN && (
-                      <button
-                        onClick={goToSettings}
-                        className="w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 flex items-center"
-                      >
-                        <Settings className="h-4 w-4 mr-2" />
-                        Settings
-                      </button>
-                    )}
-
-                    <div className="border-t border-gray-200">
-                      <button
-                        onClick={handleLogout}
-                        className="w-full text-left px-4 py-2 text-sm text-red-700 hover:bg-red-50 flex items-center"
-                      >
-                        <LogOut className="h-4 w-4 mr-2" />
-                        Sign out
-                      </button>
-                    </div>
+                    <button
+                      onClick={goToSettings}
+                      className="flex items-center w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                    >
+                      <Settings className="h-4 w-4 mr-2" />
+                      {currentUser.role === ROLES.ADMIN ? 'Settings' : 'Preferences'}
+                    </button>
+                    <hr className="my-1" />
+                    <button
+                      onClick={handleLogout}
+                      className="flex items-center w-full px-4 py-2 text-sm text-red-600 hover:bg-red-50"
+                    >
+                      <LogOut className="h-4 w-4 mr-2" />
+                      Sign out
+                    </button>
                   </div>
                 )}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Mobile menu */}
-        {showMobileMenu && (
-          <div className="lg:hidden mt-4 pb-4 border-t border-slate-700">
-            <div className="pt-4 space-y-2">
-              <button
-                onClick={goToDashboard}
-                className="block w-full text-left px-2 py-2 text-sm hover:bg-slate-700 rounded-md transition-colors"
-              >
-                Dashboard
-              </button>
-              {currentUser && (
-                <>
-                  <button
-                    onClick={goToProfile}
-                    className="block w-full text-left px-2 py-2 text-sm hover:bg-slate-700 rounded-md transition-colors"
-                  >
-                    Profile
-                  </button>
-                  {currentUser.role === ROLES.ADMIN && (
-                    <button
-                      onClick={goToSettings}
-                      className="block w-full text-left px-2 py-2 text-sm hover:bg-slate-700 rounded-md transition-colors"
-                    >
-                      Settings
-                    </button>
-                  )}
-                  <button
-                    onClick={handleLogout}
-                    className="block w-full text-left px-2 py-2 text-sm text-red-300 hover:bg-slate-700 rounded-md transition-colors"
-                  >
-                    Sign out
-                  </button>
-                </>
-              )}
-            </div>
+            )}
           </div>
-        )}
+        </div>
       </div>
+
+      {/* Mobile Navigation Menu */}
+      {showMobileMenu && (
+        <div className="lg:hidden bg-slate-700 border-t border-slate-600">
+          <nav className="px-4 py-2 space-y-1">
+            {navigationItems.map((item) => (
+              <button
+                key={item.name}
+                onClick={() => navigateToPage(item.path)}
+                className={`flex items-center w-full px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                  location.pathname === item.path
+                    ? 'bg-slate-600 text-blue-300'
+                    : 'hover:bg-slate-600 hover:text-blue-300'
+                }`}
+              >
+                <item.icon className="h-4 w-4 mr-2" />
+                {item.name}
+              </button>
+            ))}
+            
+            {/* Mobile user actions */}
+            {currentUser && (
+              <>
+                <hr className="border-slate-600 my-2" />
+                <div className="px-3 py-2 text-xs text-gray-400">
+                  {currentUser.fullname || currentUser.email} • {getRoleName(currentUser.role)}
+                </div>
+                <button
+                  onClick={goToProfile}
+                  className="flex items-center w-full px-3 py-2 rounded-md text-sm font-medium hover:bg-slate-600 hover:text-blue-300"
+                >
+                  <User className="h-4 w-4 mr-2" />
+                  Profile
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="flex items-center w-full px-3 py-2 rounded-md text-sm font-medium text-red-300 hover:bg-red-600 hover:text-white"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign out
+                </button>
+              </>
+            )}
+          </nav>
+        </div>
+      )}
+
+      {/* Backdrop for dropdowns */}
+      {(showDropdown || showMobileMenu) && (
+        <div
+          className="fixed inset-0 z-30"
+          onClick={() => {
+            setShowDropdown(false);
+            setShowMobileMenu(false);
+          }}
+        />
+      )}
     </header>
   );
 };

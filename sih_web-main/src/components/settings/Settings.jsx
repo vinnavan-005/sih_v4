@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Cog, 
-  Clock, 
   Trash2, 
   UserPlus,
   Save,
@@ -10,13 +9,16 @@ import {
   RefreshCw,
   Eye,
   EyeOff,
-  Building
+  Building,
+  Shield,
+  Database
 } from 'lucide-react';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://192.168.1.103:8000/api';
+import { useAuth } from '../../context/AuthContext';
+import apiService from '../../services/api';
+import { ROLES, ROLE_LABELS } from '../../utils/constants';
 
 const Settings = () => {
-  const [currentUser, setCurrentUser] = useState(null);
+  const { currentUser, hasPermission } = useAuth();
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -38,40 +40,23 @@ const Settings = () => {
   });
 
   const roles = [
-    { value: 'citizen', label: 'Citizen' },
-    { value: 'staff', label: 'Staff Member' },
-    { value: 'supervisor', label: 'Supervisor' },
-    { value: 'admin', label: 'Administrator' }
+    { value: ROLES.CITIZEN, label: ROLE_LABELS[ROLES.CITIZEN] },
+    { value: ROLES.STAFF, label: ROLE_LABELS[ROLES.STAFF] },
+    { value: ROLES.SUPERVISOR, label: ROLE_LABELS[ROLES.SUPERVISOR] },
+    { value: ROLES.ADMIN, label: ROLE_LABELS[ROLES.ADMIN] }
   ];
 
   useEffect(() => {
     loadInitialData();
-  }, []);
+  }, [currentUser]);
 
   const loadInitialData = async () => {
     try {
       setLoading(true);
       
-      // Get current user
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
-
-      const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (!userResponse.ok) {
-        throw new Error('Failed to fetch user data');
-      }
-      
-      const userData = await userResponse.json();
-      setCurrentUser(userData);
-
-      // Check if user is admin
-      if (userData.role !== 'admin') {
-        setMessage('Access denied! Admin only.');
+      // Check if user has manage users permission
+      if (!currentUser || !hasPermission('manage-users')) {
+        setMessage('Access denied! Admin privileges required.');
         setTimeout(() => {
           window.location.href = '/dashboard';
         }, 2000);
@@ -95,49 +80,43 @@ const Settings = () => {
 
   const loadUsers = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/users?per_page=100`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setUsers(data);
-      }
+      const data = await apiService.users.list({ per_page: 100 });
+      setUsers(data.users || data.data || []);
     } catch (err) {
       console.error('Failed to load users:', err);
+      setUsers([]);
     }
   };
 
   const loadDepartments = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/users/departments`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        setDepartments(data);
-      }
+      const data = await apiService.users.getDepartments();
+      setDepartments(data.departments || data || []);
     } catch (err) {
       console.error('Failed to load departments:', err);
+      setDepartments([]);
     }
   };
 
   const loadUserStats = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/users/stats`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const data = await apiService.users.getStats();
+      setUserStats({
+        total_users: data.total_users || 0,
+        citizens: data.citizens || 0,
+        staff: data.staff || 0,
+        supervisors: data.supervisors || 0,
+        admins: data.admins || 0
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setUserStats(data);
-      }
     } catch (err) {
       console.error('Failed to load user stats:', err);
+      setUserStats({
+        total_users: 0,
+        citizens: 0,
+        staff: 0,
+        supervisors: 0,
+        admins: 0
+      });
     }
   };
 
@@ -151,60 +130,26 @@ const Settings = () => {
     }
 
     // Check if department is required for non-citizen roles
-    if ((newUser.role === 'staff' || newUser.role === 'supervisor') && !newUser.department) {
+    if ((newUser.role === ROLES.STAFF || newUser.role === ROLES.SUPERVISOR) && !newUser.department) {
       setMessage('Please select a department for this role.');
       return;
     }
 
     try {
-      const token = localStorage.getItem('token');
-      
-      // Register user
-      const registerResponse = await fetch(`${API_BASE_URL}/auth/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          email: newUser.email,
-          password: newUser.password,
-          full_name: newUser.full_name
-        })
-      });
+      // Create user with the new API service
+      const userData = {
+        email: newUser.email,
+        password: newUser.password,
+        full_name: newUser.full_name,
+        role: newUser.role
+      };
 
-      if (!registerResponse.ok) {
-        const errorData = await registerResponse.json();
-        throw new Error(errorData.detail || 'Failed to create user');
+      // Add department if specified
+      if (newUser.department) {
+        userData.department = newUser.department;
       }
 
-      const userData = await registerResponse.json();
-
-      // Update user profile with role and department if needed
-      if (newUser.role !== 'citizen' || newUser.department) {
-        const updateData = {};
-        if (newUser.role !== 'citizen') {
-          updateData.role = newUser.role;
-        }
-        if (newUser.department) {
-          updateData.department = newUser.department;
-        }
-
-        if (Object.keys(updateData).length > 0) {
-          const updateResponse = await fetch(`${API_BASE_URL}/users/${userData.user.id}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify(updateData)
-          });
-
-          if (!updateResponse.ok) {
-            console.warn('Failed to update user role/department');
-          }
-        }
-      }
+      await apiService.auth.register(userData);
 
       setMessage('User created successfully!');
       setNewUser({ full_name: '', email: '', role: '', password: '', department: '' });
@@ -225,24 +170,25 @@ const Settings = () => {
     }
 
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/users/${userId}/change-role`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify(newRole)
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to change role');
-      }
-
+      await apiService.users.changeRole(userId, newRole);
       setMessage('User role updated successfully!');
       await Promise.all([loadUsers(), loadUserStats()]);
-      
+    } catch (err) {
+      setMessage(`Error: ${err.message}`);
+    }
+
+    setTimeout(() => setMessage(''), 3000);
+  };
+
+  const handleDeleteUser = async (userId) => {
+    if (!window.confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      await apiService.users.delete(userId);
+      setMessage('User deleted successfully!');
+      await Promise.all([loadUsers(), loadUserStats()]);
     } catch (err) {
       setMessage(`Error: ${err.message}`);
     }
@@ -252,13 +198,13 @@ const Settings = () => {
 
   const getRoleColor = (role) => {
     switch (role) {
-      case 'admin':
+      case ROLES.ADMIN:
         return 'bg-red-100 text-red-800';
-      case 'supervisor':
+      case ROLES.SUPERVISOR:
         return 'bg-blue-100 text-blue-800';
-      case 'staff':
+      case ROLES.STAFF:
         return 'bg-green-100 text-green-800';
-      case 'citizen':
+      case ROLES.CITIZEN:
         return 'bg-gray-100 text-gray-800';
       default:
         return 'bg-gray-100 text-gray-800';
@@ -276,13 +222,13 @@ const Settings = () => {
     );
   }
 
-  if (currentUser?.role !== 'admin') {
+  if (!currentUser || !hasPermission('manage-users')) {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded text-center">
             <AlertCircle className="h-6 w-6 inline mr-2" />
-            Access denied! Admin only.
+            Access denied! Admin privileges required.
           </div>
         </div>
       </div>
@@ -398,7 +344,7 @@ const Settings = () => {
               />
               <select
                 value={newUser.role}
-                onChange={(e) => setNewUser({...newUser, role: e.target.value, department: e.target.value === 'citizen' ? '' : newUser.department})}
+                onChange={(e) => setNewUser({...newUser, role: e.target.value, department: e.target.value === ROLES.CITIZEN ? '' : newUser.department})}
                 className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 required
               >
@@ -424,7 +370,7 @@ const Settings = () => {
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </button>
               </div>
-              {(newUser.role === 'staff' || newUser.role === 'supervisor') && (
+              {(newUser.role === ROLES.STAFF || newUser.role === ROLES.SUPERVISOR) && (
                 <select
                   value={newUser.department}
                   onChange={(e) => setNewUser({...newUser, department: e.target.value})}
@@ -497,7 +443,7 @@ const Settings = () => {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(user.role)}`}>
-                          {user.role || 'citizen'}
+                          {ROLE_LABELS[user.role] || user.role || 'citizen'}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
@@ -521,6 +467,15 @@ const Settings = () => {
                             <option key={role.value} value={role.value}>{role.label}</option>
                           ))}
                         </select>
+                        {user.id !== currentUser?.id && (
+                          <button
+                            onClick={() => handleDeleteUser(user.id)}
+                            className="text-red-600 hover:text-red-800 transition-colors"
+                            title="Delete User"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -537,23 +492,33 @@ const Settings = () => {
             System Information
           </h3>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <div>
-              <h4 className="text-lg font-medium text-gray-900 mb-3">API Status</h4>
+              <h4 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+                <Database className="h-5 w-5 mr-2" />
+                API Status
+              </h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Backend URL:</span>
-                  <span className="text-gray-900">{API_BASE_URL}</span>
+                  <span className="text-gray-900">{apiService.baseURL}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Authentication:</span>
                   <span className="text-green-600">Active</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">User Role:</span>
+                  <span className="text-blue-600">{ROLE_LABELS[currentUser?.role] || currentUser?.role}</span>
+                </div>
               </div>
             </div>
             
             <div>
-              <h4 className="text-lg font-medium text-gray-900 mb-3">Departments</h4>
+              <h4 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+                <Building className="h-5 w-5 mr-2" />
+                Departments
+              </h4>
               <div className="space-y-1 text-sm">
                 {departments.length === 0 ? (
                   <p className="text-gray-500">No departments configured</p>
@@ -565,6 +530,33 @@ const Settings = () => {
                     </div>
                   ))
                 )}
+              </div>
+            </div>
+
+            <div>
+              <h4 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
+                <Shield className="h-5 w-5 mr-2" />
+                Permissions
+              </h4>
+              <div className="space-y-1 text-sm">
+                <div className="flex items-center">
+                  <span className="text-gray-600">Manage Users:</span>
+                  <span className={`ml-2 ${hasPermission('manage-users') ? 'text-green-600' : 'text-red-600'}`}>
+                    {hasPermission('manage-users') ? 'Yes' : 'No'}
+                  </span>
+                </div>
+                <div className="flex items-center">
+                  <span className="text-gray-600">System Settings:</span>
+                  <span className={`ml-2 ${hasPermission('system-settings') ? 'text-green-600' : 'text-red-600'}`}>
+                    {hasPermission('system-settings') ? 'Yes' : 'No'}
+                  </span>
+                </div>
+                <div className="flex items-center">
+                  <span className="text-gray-600">View Analytics:</span>
+                  <span className={`ml-2 ${hasPermission('view-analytics') ? 'text-green-600' : 'text-red-600'}`}>
+                    {hasPermission('view-analytics') ? 'Yes' : 'No'}
+                  </span>
+                </div>
               </div>
             </div>
           </div>

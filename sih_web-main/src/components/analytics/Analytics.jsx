@@ -1,64 +1,64 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from "../../context/AuthContext";
 import Header from '../common/Header';
-import Sidebar from '../common/Sidebar';
-import Charts from './Charts';
-import LoadingSpinner, { ErrorState } from '../common/LoadingSpinner';
-import { Download, FileText, Map, TrendingUp, Filter, RefreshCw } from 'lucide-react';
+import { PageLoader, ErrorState } from '../common/LoadingSpinner';
+import { Download, FileText, Map, TrendingUp, Filter, RefreshCw, BarChart3, PieChart, Calendar, Users } from 'lucide-react';
 import apiService from '../../services/api';
+import { ROLES } from '../../utils/constants';
 
 const Analytics = () => {
   const { currentUser } = useAuth();
   const [analyticsData, setAnalyticsData] = useState({
-    mapData: [],
-    resolutionData: { labels: [], values: [] },
-    departmentData: { labels: [], values: [] },
-    categoryData: { labels: [], values: [] },
-    timeSeriesData: { labels: [], values: [] }
+    overview: null,
+    trends: null,
+    departments: null,
+    performance: null
   });
-  const [dashboardStats, setDashboardStats] = useState(null);
-  const [trendsData, setTrendsData] = useState(null);
-  const [performanceData, setPerformanceData] = useState(null);
-  const [departmentStats, setDepartmentStats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [dateRange, setDateRange] = useState(30); // days
+  const [dateRange, setDateRange] = useState('30');
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [period, setPeriod] = useState('month');
+  const [issuesData, setIssuesData] = useState([]);
+
+  useEffect(() => {
+    if (currentUser) {
+      fetchAnalyticsData();
+    }
+  }, [currentUser, dateRange, period]);
 
   const fetchAnalyticsData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Fetch dashboard overview
-      const dashboardResponse = await apiService.getDashboardOverview();
-      if (dashboardResponse.success) {
-        setDashboardStats(dashboardResponse);
+      // Fetch available data from working endpoints
+      const [overviewData, issuesResponse] = await Promise.allSettled([
+        apiService.dashboard.getOverview(),
+        apiService.issues.list({ per_page: 100 }) // Get more data for analysis
+      ]);
+
+      // Handle overview data (with fallback)
+      if (overviewData.status === 'fulfilled') {
+        setAnalyticsData(prev => ({ ...prev, overview: overviewData.value }));
       }
 
-      // Fetch trends data
-      const trendsResponse = await apiService.getTrends(dateRange);
-      if (trendsResponse.success) {
-        setTrendsData(trendsResponse);
+      // Handle issues data for local analytics
+      if (issuesResponse.status === 'fulfilled') {
+        const issues = issuesResponse.value?.issues || issuesResponse.value?.data || [];
+        setIssuesData(issues);
+        
+        // Generate local analytics from issues data
+        generateLocalAnalytics(issues);
       }
 
-      // Fetch performance metrics
-      const performanceResponse = await apiService.getPerformanceMetrics(period);
-      if (performanceResponse) {
-        setPerformanceData(performanceResponse);
+      // Try to fetch additional analytics if available
+      try {
+        const trendsData = await apiService.analytics.getTrends({ period });
+        setAnalyticsData(prev => ({ ...prev, trends: trendsData }));
+      } catch (err) {
+        console.log('Trends endpoint not available, using local data');
       }
-
-      // Fetch department statistics (admin/supervisor only)
-      if (currentUser?.role === 'Admin' || currentUser?.role === 'DepartmentStaff') {
-        const deptResponse = await apiService.getDepartmentStats();
-        if (deptResponse.success) {
-          setDepartmentStats(deptResponse.departments);
-        }
-      }
-
-      // Process data for charts
-      await processAnalyticsData();
 
     } catch (err) {
       console.error('Analytics fetch error:', err);
@@ -68,245 +68,201 @@ const Analytics = () => {
     }
   };
 
-  const processAnalyticsData = async () => {
-    try {
-      // Get issues data for processing
-      const issuesResponse = await apiService.getIssues({
-        per_page: 1000, // Get more data for analytics
-        order_by: '-created_at'
-      });
+  const generateLocalAnalytics = (issues) => {
+    if (!issues || issues.length === 0) return;
 
-      if (!issuesResponse.success) return;
+    // Generate status distribution
+    const statusCounts = issues.reduce((acc, issue) => {
+      const status = issue.status || 'unknown';
+      acc[status] = (acc[status] || 0) + 1;
+      return acc;
+    }, {});
 
-      let filteredIssues = issuesResponse.issues || [];
+    // Generate category distribution
+    const categoryCounts = issues.reduce((acc, issue) => {
+      const category = issue.category || 'Other';
+      acc[category] = (acc[category] || 0) + 1;
+      return acc;
+    }, {});
 
-      // Role-based filtering
-      if (currentUser.role === 'DepartmentStaff') {
-        // Backend already filters by department for staff
-      } else if (currentUser.role === 'FieldSupervisor') {
-        // Get assignments for supervisor
-        const assignmentsResponse = await apiService.getMyAssignments();
-        if (assignmentsResponse.success) {
-          const assignedIssueIds = assignmentsResponse.assignments.map(a => a.issue_id);
-          filteredIssues = filteredIssues.filter(issue => assignedIssueIds.includes(issue.id));
-        }
+    // Generate department distribution (if user can see all departments)
+    const departmentCounts = issues.reduce((acc, issue) => {
+      if (issue.department) {
+        acc[issue.department] = (acc[issue.department] || 0) + 1;
       }
+      return acc;
+    }, {});
 
-      // Department filtering (for Admin)
-      if (selectedDepartment && currentUser.role === 'Admin') {
-        // This would need backend support for department-based issue filtering
-        // For now, we'll use client-side filtering based on available data
+    // Generate time-based data (last 30 days)
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    
+    const timeBasedData = issues
+      .filter(issue => new Date(issue.created_at) >= thirtyDaysAgo)
+      .reduce((acc, issue) => {
+        const date = new Date(issue.created_at).toLocaleDateString();
+        acc[date] = (acc[date] || 0) + 1;
+        return acc;
+      }, {});
+
+    setAnalyticsData(prev => ({
+      ...prev,
+      localAnalytics: {
+        statusDistribution: statusCounts,
+        categoryDistribution: categoryCounts,
+        departmentDistribution: departmentCounts,
+        timeBasedDistribution: timeBasedData,
+        totalIssues: issues.length,
+        recentIssues: issues.filter(issue => 
+          new Date(issue.created_at) >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+        ).length
       }
-
-      // Date range filtering
-      if (dateRange !== 'all') {
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - dateRange);
-        
-        filteredIssues = filteredIssues.filter(issue => {
-          if (!issue.created_at) return true;
-          return new Date(issue.created_at) >= cutoffDate;
-        });
-      }
-
-      // Process map data
-      const mapData = filteredIssues
-        .filter(issue => issue.latitude && issue.longitude)
-        .map(issue => ({
-          id: issue.id,
-          lat: parseFloat(issue.latitude),
-          lng: parseFloat(issue.longitude),
-          category: issue.category,
-          status: issue.status,
-          title: issue.title,
-          upvotes: issue.upvotes || 0
-        }));
-
-      // Process resolution time data using backend stats if available
-      let resolutionData = { labels: [], values: [] };
-      if (dashboardStats?.issue_stats?.issues_by_department) {
-        const deptData = dashboardStats.issue_stats.issues_by_department;
-        resolutionData = {
-          labels: Object.keys(deptData),
-          values: Object.values(deptData)
-        };
-      }
-
-      // Process department performance data
-      let departmentData = { labels: [], values: [] };
-      if (departmentStats.length > 0) {
-        departmentData = {
-          labels: departmentStats.map(dept => dept.department),
-          values: departmentStats.map(dept => dept.resolved_issues)
-        };
-      }
-
-      // Process category data using backend stats
-      let categoryData = { labels: [], values: [] };
-      if (dashboardStats?.issue_stats?.issues_by_category) {
-        const catData = dashboardStats.issue_stats.issues_by_category;
-        categoryData = {
-          labels: Object.keys(catData).map(cat => {
-            // Map backend categories to frontend display names
-            const categoryMap = {
-              'roads': 'Roads & Infrastructure',
-              'waste': 'Waste Management',
-              'water': 'Water Issues',
-              'streetlight': 'Street Lighting',
-              'other': 'Other'
-            };
-            return categoryMap[cat] || cat;
-          }),
-          values: Object.values(catData)
-        };
-      }
-
-      // Process time series data using trends data
-      let timeSeriesData = { labels: [], values: [] };
-      if (trendsData?.issues_created) {
-        timeSeriesData = {
-          labels: trendsData.issues_created.map(item => 
-            new Date(item.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-          ),
-          values: trendsData.issues_created.map(item => item.count)
-        };
-      }
-
-      setAnalyticsData({
-        mapData,
-        resolutionData,
-        departmentData,
-        categoryData,
-        timeSeriesData
-      });
-
-    } catch (err) {
-      console.error('Data processing error:', err);
-    }
+    }));
   };
 
-  useEffect(() => {
-    if (currentUser) {
-      fetchAnalyticsData();
+  const exportData = () => {
+    if (!analyticsData.localAnalytics && !issuesData.length) {
+      alert('No data available to export');
+      return;
     }
-  }, [currentUser, dateRange, selectedDepartment, period]);
 
-  const handleExportData = async (format = 'json') => {
-    try {
-      const response = await apiService.exportDashboardData(format, false);
+    let csvContent = 'Type,Count,Label,Department\n';
+    
+    // Add local analytics data
+    if (analyticsData.localAnalytics) {
+      const { statusDistribution, categoryDistribution, departmentDistribution } = analyticsData.localAnalytics;
       
-      if (format === 'json') {
-        const blob = new Blob([JSON.stringify(response, null, 2)], { 
-          type: 'application/json' 
-        });
-        downloadFile(blob, `analytics_export_${new Date().toISOString().split('T')[0]}.json`);
-      } else if (format === 'csv') {
-        // Backend should return CSV data
-        const csvContent = generateCSVFromData(response);
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        downloadFile(blob, `analytics_report_${new Date().toISOString().split('T')[0]}.csv`);
-      }
-    } catch (error) {
-      console.error('Export failed:', error);
-      alert('Export failed: ' + error.message);
+      // Status data
+      Object.entries(statusDistribution || {}).forEach(([status, count]) => {
+        csvContent += `Status,${count},${status},All\n`;
+      });
+      
+      // Category data
+      Object.entries(categoryDistribution || {}).forEach(([category, count]) => {
+        csvContent += `Category,${count},${category},All\n`;
+      });
+      
+      // Department data (if available)
+      Object.entries(departmentDistribution || {}).forEach(([dept, count]) => {
+        csvContent += `Department,${count},${dept},${dept}\n`;
+      });
     }
-  };
 
-  const downloadFile = (blob, filename) => {
+    // Create and download file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
-    
     link.setAttribute('href', url);
-    link.setAttribute('download', filename);
+    link.setAttribute('download', `analytics_${new Date().toISOString().split('T')[0]}.csv`);
     link.style.visibility = 'hidden';
-    
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    URL.revokeObjectURL(url);
   };
 
-  const generateCSVFromData = (data) => {
-    const headers = ['Metric', 'Value', 'Category', 'Department'];
-    let csvContent = headers.join(',') + '\n';
+  const renderStatCard = (title, value, Icon, color = 'blue') => {
+    const colorClasses = {
+      blue: 'bg-blue-100 text-blue-600',
+      green: 'bg-green-100 text-green-600',
+      yellow: 'bg-yellow-100 text-yellow-600',
+      red: 'bg-red-100 text-red-600',
+      purple: 'bg-purple-100 text-purple-600'
+    };
 
-    // Add issue statistics
-    if (data.issue_stats) {
-      const stats = data.issue_stats;
-      csvContent += `Total Issues,${stats.total_issues},Overall,All\n`;
-      csvContent += `Pending Issues,${stats.pending_issues},Status,All\n`;
-      csvContent += `In Progress Issues,${stats.in_progress_issues},Status,All\n`;
-      csvContent += `Resolved Issues,${stats.resolved_issues},Status,All\n`;
-      csvContent += `Total Upvotes,${stats.total_upvotes},Engagement,All\n`;
-      
-      if (stats.avg_resolution_time) {
-        csvContent += `Avg Resolution Time,${stats.avg_resolution_time} days,Performance,All\n`;
-      }
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6">
+        <div className="flex items-center">
+          <div className={`p-2 rounded-lg ${colorClasses[color]}`}>
+            <Icon className="w-6 h-6" />
+          </div>
+          <div className="ml-4">
+            <p className="text-sm font-medium text-gray-600">{title}</p>
+            <p className="text-2xl font-bold text-gray-900">{value}</p>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
-      // Add category data
-      if (stats.issues_by_category) {
-        Object.entries(stats.issues_by_category).forEach(([category, count]) => {
-          csvContent += `Issues by Category,${count},${category},All\n`;
-        });
-      }
-
-      // Add department data
-      if (stats.issues_by_department) {
-        Object.entries(stats.issues_by_department).forEach(([dept, count]) => {
-          csvContent += `Issues by Department,${count},Department,${dept}\n`;
-        });
-      }
+  const renderDistributionChart = (title, data, type = 'bar') => {
+    if (!data || Object.keys(data).length === 0) {
+      return (
+        <div className="bg-white rounded-lg shadow-sm p-6">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+          <p className="text-gray-500 text-center py-8">No data available</p>
+        </div>
+      );
     }
 
-    return csvContent;
+    const entries = Object.entries(data).slice(0, 10); // Limit to top 10
+    const maxValue = Math.max(...entries.map(([, value]) => value));
+
+    return (
+      <div className="bg-white rounded-lg shadow-sm p-6">
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
+        <div className="space-y-3">
+          {entries.map(([label, value], index) => (
+            <div key={label} className="flex items-center">
+              <div className="w-24 text-sm text-gray-600 truncate">{label}</div>
+              <div className="flex-1 mx-3">
+                <div className="bg-gray-200 rounded-full h-2">
+                  <div 
+                    className={`h-2 rounded-full ${
+                      index % 4 === 0 ? 'bg-blue-500' :
+                      index % 4 === 1 ? 'bg-green-500' :
+                      index % 4 === 2 ? 'bg-yellow-500' : 'bg-purple-500'
+                    }`}
+                    style={{ width: `${(value / maxValue) * 100}%` }}
+                  />
+                </div>
+              </div>
+              <div className="w-12 text-sm font-medium text-gray-900">{value}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   if (loading) {
     return (
-      <div className="flex min-h-screen bg-gray-50">
-        <Sidebar />
-        <div className="flex-1 ml-60">
-          <Header title="Analytics & Reports" />
-          <main className="p-6">
-            <LoadingSpinner size="large" text="Loading analytics data..." />
-          </main>
-        </div>
+      <div className="min-h-screen bg-gray-50">
+        <Header title="Analytics & Reports" />
+        <PageLoader text="Loading analytics data..." />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="flex min-h-screen bg-gray-50">
-        <Sidebar />
-        <div className="flex-1 ml-60">
-          <Header title="Analytics & Reports" />
-          <main className="p-6">
-            <ErrorState
-              title="Failed to load analytics"
-              message={error}
-              onRetry={fetchAnalyticsData}
-            />
-          </main>
+      <div className="min-h-screen bg-gray-50">
+        <Header title="Analytics & Reports" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <ErrorState
+            title="Failed to load analytics"
+            message={error}
+            onRetry={fetchAnalyticsData}
+          />
         </div>
       </div>
     );
   }
 
+  const { overview, localAnalytics } = analyticsData;
+
   return (
-    <div className="flex min-h-screen bg-gray-50">
-      <Sidebar />
-      <div className="flex-1 ml-60">
-        <Header title="Analytics & Reports" />
-        
-        <main className="p-6">
-          {/* Controls and Filters */}
-          <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-                <Filter className="h-5 w-5 mr-2" />
-                Analytics Controls
-              </h3>
+    <div className="min-h-screen bg-gray-50">
+      <Header title="Analytics & Reports" />
+      
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Controls and Filters */}
+        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
+              <Filter className="h-5 w-5 mr-2" />
+              Analytics Controls
+            </h3>
+            <div className="flex items-center space-x-4">
               <button
                 onClick={fetchAnalyticsData}
                 disabled={loading}
@@ -315,213 +271,185 @@ const Analytics = () => {
                 <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
-            </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Date Range
-                </label>
-                <select
-                  value={dateRange}
-                  onChange={(e) => setDateRange(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value={7}>Last 7 days</option>
-                  <option value={30}>Last 30 days</option>
-                  <option value={90}>Last 90 days</option>
-                  <option value={365}>Last year</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Performance Period
-                </label>
-                <select
-                  value={period}
-                  onChange={(e) => setPeriod(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                >
-                  <option value="week">This Week</option>
-                  <option value="month">This Month</option>
-                  <option value="quarter">This Quarter</option>
-                  <option value="year">This Year</option>
-                </select>
-              </div>
-              
-              {currentUser?.role === 'Admin' && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Department Filter
-                  </label>
-                  <select
-                    value={selectedDepartment}
-                    onChange={(e) => setSelectedDepartment(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  >
-                    <option value="">All Departments</option>
-                    {departmentStats.map(dept => (
-                      <option key={dept.department} value={dept.department}>
-                        {dept.department}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
+              <button
+                onClick={exportData}
+                className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Export CSV
+              </button>
             </div>
           </div>
-
-          {/* Key Metrics Overview */}
-          {dashboardStats?.issue_stats && (
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-              <div className="bg-white rounded-lg p-6 shadow-sm border-l-4 border-blue-500">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Total Issues</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {dashboardStats.issue_stats.total_issues}
-                    </p>
-                  </div>
-                  <FileText className="h-8 w-8 text-blue-500" />
-                </div>
-              </div>
-              <div className="bg-white rounded-lg p-6 shadow-sm border-l-4 border-green-500">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Resolution Rate</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {dashboardStats.issue_stats.total_issues > 0 
-                        ? Math.round((dashboardStats.issue_stats.resolved_issues / dashboardStats.issue_stats.total_issues) * 100)
-                        : 0}%
-                    </p>
-                  </div>
-                  <TrendingUp className="h-8 w-8 text-green-500" />
-                </div>
-              </div>
-              <div className="bg-white rounded-lg p-6 shadow-sm border-l-4 border-yellow-500">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Avg Resolution Time</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {dashboardStats.issue_stats.avg_resolution_time || 'N/A'}
-                      {dashboardStats.issue_stats.avg_resolution_time && ' days'}
-                    </p>
-                  </div>
-                  <TrendingUp className="h-8 w-8 text-yellow-500" />
-                </div>
-              </div>
-              <div className="bg-white rounded-lg p-6 shadow-sm border-l-4 border-purple-500">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-sm text-gray-600">Total Upvotes</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {dashboardStats.issue_stats.total_upvotes}
-                    </p>
-                  </div>
-                  <TrendingUp className="h-8 w-8 text-purple-500" />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Issue Hotspots Map */}
-          <section className="bg-white rounded-lg shadow-sm p-6 mb-6">
-            <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-              <Map className="h-6 w-6 text-red-500 mr-2" />
-              Issue Hotspots
-            </h3>
-            <div className="bg-gray-200 rounded-lg h-96 flex items-center justify-center text-gray-600 font-medium">
-              <div className="text-center">
-                <Map className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                <p>[Interactive Heatmap - {analyticsData.mapData.length} issues plotted]</p>
-                <p className="text-sm mt-2">Map integration with Leaflet/MapBox would display here</p>
-                {analyticsData.mapData.length > 0 && (
-                  <p className="text-xs text-gray-500 mt-2">
-                    Issues with location data: {analyticsData.mapData.length}
-                  </p>
-                )}
-              </div>
-            </div>
-          </section>
-
-          {/* Performance Charts */}
-          <section className="bg-white rounded-lg shadow-sm p-6 mb-6">
-            <h3 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
-              <TrendingUp className="h-6 w-6 text-blue-500 mr-2" />
-              Performance Metrics
-            </h3>
-            <Charts data={analyticsData} />
-          </section>
-
-          {/* Performance Data Table */}
-          {performanceData && (
-            <section className="bg-white rounded-lg shadow-sm p-6 mb-6">
-              <h3 className="text-xl font-semibold text-gray-900 mb-4">
-                Performance Summary ({period})
-              </h3>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="text-center p-4 bg-blue-50 rounded-lg">
-                  <div className="text-2xl font-bold text-blue-600">
-                    {performanceData.metrics?.issues_created || 0}
-                  </div>
-                  <div className="text-sm text-gray-600">Issues Created</div>
-                </div>
-                <div className="text-center p-4 bg-green-50 rounded-lg">
-                  <div className="text-2xl font-bold text-green-600">
-                    {performanceData.metrics?.issues_resolved || 0}
-                  </div>
-                  <div className="text-sm text-gray-600">Issues Resolved</div>
-                </div>
-                <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                  <div className="text-2xl font-bold text-yellow-600">
-                    {performanceData.metrics?.resolution_rate || 0}%
-                  </div>
-                  <div className="text-sm text-gray-600">Resolution Rate</div>
-                </div>
-                <div className="text-center p-4 bg-purple-50 rounded-lg">
-                  <div className="text-2xl font-bold text-purple-600">
-                    {performanceData.metrics?.avg_resolution_time || 'N/A'}
-                    {performanceData.metrics?.avg_resolution_time && ' days'}
-                  </div>
-                  <div className="text-sm text-gray-600">Avg Resolution Time</div>
-                </div>
-              </div>
-            </section>
-          )}
-
-          {/* Export Section */}
-          <section className="bg-white rounded-lg shadow-sm p-6">
-            <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-              <FileText className="h-6 w-6 text-green-500 mr-2" />
-              Export Reports
-            </h3>
-            <div className="flex flex-wrap gap-4">
-              <button
-                onClick={() => handleExportData('csv')}
-                className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors inline-flex items-center"
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Date Range</label>
+              <select
+                value={dateRange}
+                onChange={(e) => setDateRange(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
-                <Download className="h-5 w-5 mr-2" />
-                Download CSV
-              </button>
-              <button
-                onClick={() => handleExportData('json')}
-                className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center"
-              >
-                <Download className="h-5 w-5 mr-2" />
-                Download JSON
-              </button>
+                <option value="7">Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="90">Last 3 months</option>
+                <option value="365">Last year</option>
+              </select>
             </div>
             
-            <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-              <p className="text-sm text-blue-800">
-                <strong>Report includes:</strong> Issue statistics, resolution metrics, 
-                department performance, category breakdown, and trends based on your current filters.
-                Data is filtered according to your role permissions.
-              </p>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Period</label>
+              <select
+                value={period}
+                onChange={(e) => setPeriod(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="day">Daily</option>
+                <option value="week">Weekly</option>
+                <option value="month">Monthly</option>
+              </select>
             </div>
-          </section>
-        </main>
+            
+            {currentUser?.role === ROLES.ADMIN && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
+                <select
+                  value={selectedDepartment}
+                  onChange={(e) => setSelectedDepartment(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">All Departments</option>
+                  <option value="roads">Roads & Infrastructure</option>
+                  <option value="water">Water & Sanitation</option>
+                  <option value="waste">Waste Management</option>
+                  <option value="electricity">Electricity</option>
+                </select>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Overview Stats */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+          {renderStatCard(
+            'Total Issues',
+            localAnalytics?.totalIssues || overview?.totalIssues || 0,
+            FileText,
+            'blue'
+          )}
+          {renderStatCard(
+            'Recent Issues',
+            localAnalytics?.recentIssues || 0,
+            TrendingUp,
+            'green'
+          )}
+          {renderStatCard(
+            'Open Issues',
+            localAnalytics?.statusDistribution?.open || overview?.openIssues || 0,
+            BarChart3,
+            'yellow'
+          )}
+          {renderStatCard(
+            'Resolved Issues',
+            localAnalytics?.statusDistribution?.resolved || overview?.resolvedIssues || 0,
+            PieChart,
+            'green'
+          )}
+        </div>
+
+        {/* Charts Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+          {renderDistributionChart(
+            'Issues by Status',
+            localAnalytics?.statusDistribution
+          )}
+          
+          {renderDistributionChart(
+            'Issues by Category',
+            localAnalytics?.categoryDistribution
+          )}
+          
+          {currentUser?.role === ROLES.ADMIN && renderDistributionChart(
+            'Issues by Department',
+            localAnalytics?.departmentDistribution
+          )}
+          
+          {renderDistributionChart(
+            'Recent Activity (Last 30 Days)',
+            localAnalytics?.timeBasedDistribution
+          )}
+        </div>
+
+        {/* Recent Issues Table */}
+        {issuesData.length > 0 && (
+          <div className="bg-white rounded-lg shadow-sm">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h3 className="text-lg font-semibold text-gray-900">Recent Issues</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Title
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Status
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Category
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Created
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {issuesData.slice(0, 10).map((issue) => (
+                    <tr key={issue.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="text-sm font-medium text-gray-900">
+                          {issue.title || `Issue #${issue.id}`}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          issue.status === 'resolved' ? 'bg-green-100 text-green-800' :
+                          issue.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
+                          issue.status === 'open' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-gray-100 text-gray-800'
+                        }`}>
+                          {issue.status || 'unknown'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {issue.category || 'Other'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                        {issue.created_at ? new Date(issue.created_at).toLocaleDateString() : 'Unknown'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* No Data Message */}
+        {!issuesData.length && !loading && (
+          <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+            <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">No Data Available</h3>
+            <p className="text-gray-600">
+              No analytics data is currently available. This could be because:
+            </p>
+            <ul className="text-gray-600 mt-2 space-y-1">
+              <li>• No issues have been created yet</li>
+              <li>• You don't have permission to view this data</li>
+              <li>• The backend analytics service is not available</li>
+            </ul>
+          </div>
+        )}
       </div>
     </div>
   );

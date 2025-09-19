@@ -1,80 +1,88 @@
-// src/services/api.js - Fixed API Service
-
+// Enhanced API service with proper error handling and backend integration
 import { API_ENDPOINTS, ERROR_MESSAGES, HTTP_STATUS } from '../utils/constants';
 
-// API base URL - should match your backend
+// API base URL configuration
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+// Custom error class for API errors
+class ApiError extends Error {
+  constructor(message, status, data = null) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+  }
+}
 
 class ApiService {
   constructor() {
     this.baseURL = API_BASE_URL;
-    this.defaultHeaders = {
-      'Content-Type': 'application/json',
-    };
+    this.timeout = 30000; // 30 seconds
   }
 
-  // Get authentication token
-  getAuthToken() {
-    return localStorage.getItem('token');
-  }
-
-  // Get headers with authentication
+  // Get authentication headers
   getHeaders(customHeaders = {}) {
-    const token = this.getAuthToken();
-    return {
-      ...this.defaultHeaders,
-      ...(token && { Authorization: `Bearer ${token}` }),
-      ...customHeaders,
+    const token = this.getToken();
+    const headers = {
+      'Content-Type': 'application/json',
+      ...customHeaders
     };
+
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    return headers;
   }
 
-  // Handle API response
+  // Handle API responses with proper error handling
   async handleResponse(response) {
-    const contentType = response.headers.get('content-type');
-    let data = null;
-
     try {
+      // Handle non-JSON responses
+      const contentType = response.headers.get('content-type');
+      let data;
+      
       if (contentType && contentType.includes('application/json')) {
         data = await response.json();
       } else {
         data = await response.text();
       }
-    } catch (parseError) {
-      console.error('Failed to parse response:', parseError);
-      data = null;
-    }
 
-    if (!response.ok) {
-      const errorMessage = this.getErrorMessage(response.status, data);
-      throw new Error(errorMessage);
-    }
+      if (!response.ok) {
+        const errorMessage = this.getErrorMessage(response.status, data);
+        throw new ApiError(errorMessage, response.status, data);
+      }
 
-    return data;
+      return data;
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      throw new ApiError(ERROR_MESSAGES.GENERIC_ERROR, 500, error);
+    }
   }
 
-  // Get appropriate error message based on status code
+  // Get user-friendly error messages
   getErrorMessage(status, data) {
-    // Try to get error message from response data first
-    if (data && typeof data === 'object') {
-      if (data.message) return data.message;
-      if (data.detail) return data.detail;
-      if (data.error) return data.error;
+    if (data && typeof data === 'object' && data.detail) {
+      return data.detail;
+    }
+    if (data && typeof data === 'object' && data.message) {
+      return data.message;
     }
 
-    // Fallback to standard HTTP status messages
     switch (status) {
-      case HTTP_STATUS.BAD_REQUEST:
-        return ERROR_MESSAGES.BAD_REQUEST;
       case HTTP_STATUS.UNAUTHORIZED:
         return ERROR_MESSAGES.UNAUTHORIZED;
       case HTTP_STATUS.FORBIDDEN:
         return ERROR_MESSAGES.FORBIDDEN;
       case HTTP_STATUS.NOT_FOUND:
         return ERROR_MESSAGES.NOT_FOUND;
+      case HTTP_STATUS.BAD_REQUEST:
+        return ERROR_MESSAGES.VALIDATION_ERROR;
       case HTTP_STATUS.TOO_MANY_REQUESTS:
         return ERROR_MESSAGES.RATE_LIMIT_EXCEEDED;
       case HTTP_STATUS.INTERNAL_SERVER_ERROR:
-        return ERROR_MESSAGES.SERVER_ERROR;
       case HTTP_STATUS.BAD_GATEWAY:
       case HTTP_STATUS.SERVICE_UNAVAILABLE:
         return ERROR_MESSAGES.SERVER_ERROR;
@@ -85,43 +93,49 @@ class ApiService {
     }
   }
 
-  // Make API request
+  // Make API request with timeout and proper error handling
   async request(endpoint, options = {}) {
     const url = `${this.baseURL}${endpoint}`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), this.timeout);
+
     const config = {
       ...options,
       headers: this.getHeaders(options.headers),
+      signal: controller.signal,
     };
 
     try {
       const response = await fetch(url, config);
+      clearTimeout(timeoutId);
       return await this.handleResponse(response);
     } catch (error) {
-      console.error(`API request failed: ${config.method || 'GET'} ${url}`, error);
+      clearTimeout(timeoutId);
       
-      // Handle network errors
-      if (error.name === 'TypeError' && error.message.includes('fetch')) {
-        throw new Error(ERROR_MESSAGES.NETWORK_ERROR);
+      if (error.name === 'AbortError') {
+        throw new ApiError(ERROR_MESSAGES.TIMEOUT_ERROR, 408);
       }
       
-      throw error;
+      if (error instanceof ApiError) {
+        throw error;
+      }
+      
+      // Network errors
+      if (!navigator.onLine) {
+        throw new ApiError(ERROR_MESSAGES.NETWORK_ERROR, 0);
+      }
+      
+      throw new ApiError(ERROR_MESSAGES.CONNECTION_ERROR, 0, error);
     }
   }
 
-  // GET request with safe error handling
+  // Convenience methods for different HTTP verbs
   async get(endpoint, params = {}) {
     const queryString = new URLSearchParams(params).toString();
     const url = queryString ? `${endpoint}?${queryString}` : endpoint;
-    
-    try {
-      return await this.request(url, { method: 'GET' });
-    } catch (error) {
-      console.error(`GET ${endpoint} failed:`, error);
-      return null; // Return null instead of throwing for optional data
-    }
+    return await this.request(url, { method: 'GET' });
   }
 
-  // POST request
   async post(endpoint, data = {}) {
     return await this.request(endpoint, {
       method: 'POST',
@@ -129,7 +143,6 @@ class ApiService {
     });
   }
 
-  // PUT request
   async put(endpoint, data = {}) {
     return await this.request(endpoint, {
       method: 'PUT',
@@ -137,26 +150,53 @@ class ApiService {
     });
   }
 
-  // DELETE request
+  async patch(endpoint, data = {}) {
+    return await this.request(endpoint, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  }
+
   async delete(endpoint) {
     return await this.request(endpoint, { method: 'DELETE' });
   }
 
-  // === AUTHENTICATION METHODS ===
+  // Token management
+  getToken() {
+    return localStorage.getItem('token');
+  }
+
+  setToken(token) {
+    localStorage.setItem('token', token);
+  }
+
+  removeToken() {
+    localStorage.removeItem('token');
+  }
+
+  // ===== AUTHENTICATION API =====
   auth = {
     login: async (credentials) => {
-      return await this.post(API_ENDPOINTS.AUTH.LOGIN, credentials);
+      const response = await this.post(API_ENDPOINTS.AUTH.LOGIN, credentials);
+      if (response.access_token) {
+        this.setToken(response.access_token);
+      }
+      return response;
     },
 
-    signup: async (userData) => {
+    register: async (userData) => {
       return await this.post(API_ENDPOINTS.AUTH.SIGNUP, userData);
     },
 
     logout: async () => {
-      return await this.post(API_ENDPOINTS.AUTH.LOGOUT);
+      try {
+        await this.post(API_ENDPOINTS.AUTH.LOGOUT);
+      } finally {
+        this.removeToken();
+      }
     },
 
-    getProfile: async () => {
+    getCurrentUser: async () => {
       return await this.get(API_ENDPOINTS.AUTH.PROFILE);
     },
 
@@ -169,347 +209,294 @@ class ApiService {
     },
   };
 
-  // === ISSUES METHODS ===
+  // ===== ISSUES API =====
   issues = {
     list: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ISSUES.LIST, params);
-      return data || { issues: [], total: 0, page: 1, per_page: 20 };
-    },
-
-    getById: async (id) => {
-      const endpoint = API_ENDPOINTS.ISSUES.DETAIL.replace(':id', id);
-      return await this.get(endpoint);
+      return await this.get(API_ENDPOINTS.ISSUES.LIST, params);
     },
 
     create: async (issueData) => {
       return await this.post(API_ENDPOINTS.ISSUES.CREATE, issueData);
     },
 
-    update: async (id, updateData) => {
-      const endpoint = API_ENDPOINTS.ISSUES.UPDATE.replace(':id', id);
-      return await this.put(endpoint, updateData);
+    createWithImage: async (formData) => {
+      return await this.request(API_ENDPOINTS.ISSUES.CREATE_WITH_IMAGE, {
+        method: 'POST',
+        headers: {}, // Let browser set Content-Type for FormData
+        body: formData,
+      });
     },
 
-    delete: async (id) => {
-      const endpoint = API_ENDPOINTS.ISSUES.DELETE.replace(':id', id);
-      return await this.delete(endpoint);
+    getById: async (issueId) => {
+      return await this.get(API_ENDPOINTS.ISSUES.DETAIL.replace(':id', issueId));
     },
 
-    vote: async (id, voteType) => {
-      const endpoint = API_ENDPOINTS.ISSUES.VOTE.replace(':id', id);
-      return await this.post(endpoint, { vote_type: voteType });
+    update: async (issueId, updateData) => {
+      return await this.put(API_ENDPOINTS.ISSUES.UPDATE.replace(':id', issueId), updateData);
+    },
+
+    delete: async (issueId) => {
+      return await this.delete(API_ENDPOINTS.ISSUES.DELETE.replace(':id', issueId));
+    },
+
+    vote: async (issueId) => {
+      return await this.post(API_ENDPOINTS.ISSUES.VOTE.replace(':id', issueId));
+    },
+
+    removeVote: async (issueId) => {
+      return await this.delete(API_ENDPOINTS.ISSUES.VOTE.replace(':id', issueId));
     },
 
     search: async (searchParams) => {
-      const data = await this.get(API_ENDPOINTS.ISSUES.SEARCH, searchParams);
-      return data || { issues: [], total: 0 };
+      return await this.post(API_ENDPOINTS.ISSUES.SEARCH, searchParams);
     },
 
-    getStats: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ISSUES.STATS, params);
-      return data || { total: 0, by_status: {}, by_category: {} };
+    getStats: async () => {
+      return await this.get(API_ENDPOINTS.ISSUES.STATS);
     },
 
-    getNearby: async (lat, lng, radius = 5) => {
-      const data = await this.get(API_ENDPOINTS.ISSUES.NEARBY, { lat, lng, radius });
-      return data || { issues: [] };
+    getNearby: async (params) => {
+      return await this.get(API_ENDPOINTS.ISSUES.NEARBY, params);
     },
 
-    uploadImage: async (file, options = {}) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      Object.keys(options).forEach(key => {
-        formData.append(key, options[key]);
-      });
-
+    uploadImage: async (formData) => {
       return await this.request(API_ENDPOINTS.ISSUES.UPLOAD_IMAGE, {
         method: 'POST',
+        headers: {}, // Let browser set Content-Type for FormData
         body: formData,
-        headers: {}, // Don't set Content-Type for FormData
       });
     },
   };
 
-  // === ASSIGNMENTS METHODS ===
+  // ===== ASSIGNMENTS API =====
   assignments = {
     list: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ASSIGNMENTS.LIST, params);
-      return data || { assignments: [], total: 0 };
-    },
-
-    getById: async (id) => {
-      const endpoint = API_ENDPOINTS.ASSIGNMENTS.DETAIL.replace(':id', id);
-      return await this.get(endpoint);
+      return await this.get(API_ENDPOINTS.ASSIGNMENTS.LIST, params);
     },
 
     create: async (assignmentData) => {
       return await this.post(API_ENDPOINTS.ASSIGNMENTS.CREATE, assignmentData);
     },
 
-    update: async (id, updateData) => {
-      const endpoint = API_ENDPOINTS.ASSIGNMENTS.UPDATE.replace(':id', id);
-      return await this.put(endpoint, updateData);
+    getById: async (assignmentId) => {
+      return await this.get(API_ENDPOINTS.ASSIGNMENTS.DETAIL.replace(':id', assignmentId));
     },
 
-    delete: async (id) => {
-      const endpoint = API_ENDPOINTS.ASSIGNMENTS.DELETE.replace(':id', id);
-      return await this.delete(endpoint);
+    update: async (assignmentId, updateData) => {
+      return await this.put(API_ENDPOINTS.ASSIGNMENTS.UPDATE.replace(':id', assignmentId), updateData);
     },
 
-    getMyAssignments: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ASSIGNMENTS.MY_ASSIGNMENTS, params);
-      return data || { assignments: [] };
+    delete: async (assignmentId) => {
+      return await this.delete(API_ENDPOINTS.ASSIGNMENTS.DELETE.replace(':id', assignmentId));
     },
 
-    bulkAssign: async (assignments) => {
-      return await this.post(API_ENDPOINTS.ASSIGNMENTS.BULK_ASSIGN, { assignments });
+    getByUser: async (userId) => {
+      return await this.get(API_ENDPOINTS.ASSIGNMENTS.BY_USER.replace(':id', userId));
     },
 
-    getDepartmentStats: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ASSIGNMENTS.STATS, params);
-      return data || { stats: {} };
-    },
-
-    getWorkloadStats: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ASSIGNMENTS.WORKLOAD, params);
-      return data || { workload: [] };
+    getByIssue: async (issueId) => {
+      return await this.get(API_ENDPOINTS.ASSIGNMENTS.BY_ISSUE.replace(':id', issueId));
     },
   };
 
-  // === UPDATES METHODS ===
+  // ===== UPDATES API =====
   updates = {
     list: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.UPDATES.LIST, params);
-      return data || { updates: [], total: 0 };
+      return await this.get(API_ENDPOINTS.UPDATES.LIST, params);
     },
 
     create: async (updateData) => {
       return await this.post(API_ENDPOINTS.UPDATES.CREATE, updateData);
     },
 
-    delete: async (id) => {
-      const endpoint = API_ENDPOINTS.UPDATES.DELETE.replace(':id', id);
-      return await this.delete(endpoint);
-    },
-
-    getRecent: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.UPDATES.RECENT, params);
-      return data || { updates: [] };
+    getById: async (updateId) => {
+      return await this.get(API_ENDPOINTS.UPDATES.DETAIL.replace(':id', updateId));
     },
 
     getByIssue: async (issueId) => {
-      const endpoint = API_ENDPOINTS.UPDATES.BY_ISSUE.replace(':id', issueId);
-      const data = await this.get(endpoint);
-      return data || { updates: [] };
+      return await this.get(API_ENDPOINTS.UPDATES.BY_ISSUE.replace(':id', issueId));
     },
 
-    getActivityStats: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.UPDATES.STATS, params);
-      return data || { activity: [] };
+    getRecent: async (params = {}) => {
+      return await this.get(API_ENDPOINTS.UPDATES.RECENT, params);
     },
   };
 
-  // === USERS METHODS ===
+  // ===== USERS API =====
   users = {
     list: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.USERS.LIST, params);
-      return data || { users: [], total: 0 };
+      return await this.get(API_ENDPOINTS.USERS.LIST, params);
+    },
+
+    create: async (userData) => {
+      return await this.post(API_ENDPOINTS.USERS.CREATE, userData);
     },
 
     getById: async (userId) => {
-      const endpoint = API_ENDPOINTS.USERS.DETAIL.replace(':id', userId);
-      return await this.get(endpoint);
+      return await this.get(API_ENDPOINTS.USERS.DETAIL.replace(':id', userId));
     },
 
     update: async (userId, updateData) => {
-      const endpoint = API_ENDPOINTS.USERS.UPDATE.replace(':id', userId);
-      return await this.put(endpoint, updateData);
+      return await this.put(API_ENDPOINTS.USERS.UPDATE.replace(':id', userId), updateData);
+    },
+
+    delete: async (userId) => {
+      return await this.delete(API_ENDPOINTS.USERS.DELETE.replace(':id', userId));
     },
 
     getStaff: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.USERS.STAFF, params);
-      return data || { users: [] };
+      return await this.get(API_ENDPOINTS.USERS.STAFF, params);
     },
 
     getDepartments: async () => {
-      const data = await this.get(API_ENDPOINTS.USERS.DEPARTMENTS);
-      return data || { departments: [] };
+      return await this.get(API_ENDPOINTS.USERS.DEPARTMENTS);
     },
 
-    getStats: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.USERS.STATS, params);
-      return data || { stats: {} };
+    getStats: async () => {
+      return await this.get(API_ENDPOINTS.USERS.STATS);
     },
 
-    getWorkload: async (userId, params = {}) => {
-      const endpoint = API_ENDPOINTS.USERS.WORKLOAD.replace(':id', userId);
-      const data = await this.get(endpoint, params);
-      return data || { workload: [] };
+    getWorkload: async (userId) => {
+      return await this.get(API_ENDPOINTS.USERS.WORKLOAD.replace(':id', userId));
     },
 
     changeRole: async (userId, newRole) => {
-      const endpoint = API_ENDPOINTS.USERS.CHANGE_ROLE.replace(':id', userId);
-      return await this.put(endpoint, { role: newRole });
+      return await this.post(API_ENDPOINTS.USERS.CHANGE_ROLE.replace(':id', userId), { role: newRole });
     },
   };
 
-  // === FILES METHODS ===
+  // ===== FILES API =====
   files = {
-    uploadImage: async (file, options = {}) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      Object.keys(options).forEach(key => {
-        formData.append(key, options[key]);
-      });
-
+    uploadImage: async (formData) => {
       return await this.request(API_ENDPOINTS.FILES.UPLOAD_IMAGE, {
         method: 'POST',
+        headers: {}, // Let browser set Content-Type for FormData
         body: formData,
-        headers: {}, // Don't set Content-Type for FormData
       });
     },
 
-    uploadDocument: async (file, options = {}) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      Object.keys(options).forEach(key => {
-        formData.append(key, options[key]);
-      });
-
+    uploadDocument: async (formData) => {
       return await this.request(API_ENDPOINTS.FILES.UPLOAD_DOCUMENT, {
         method: 'POST',
+        headers: {}, // Let browser set Content-Type for FormData
         body: formData,
-        headers: {},
       });
     },
 
-    uploadMultiple: async (files, options = {}) => {
-      const formData = new FormData();
-      
-      files.forEach((file, index) => {
-        formData.append(`files`, file);
-      });
-
-      Object.keys(options).forEach(key => {
-        formData.append(key, options[key]);
-      });
-
+    uploadMultiple: async (formData) => {
       return await this.request(API_ENDPOINTS.FILES.UPLOAD_MULTIPLE, {
         method: 'POST',
+        headers: {}, // Let browser set Content-Type for FormData
         body: formData,
-        headers: {},
       });
     },
 
-    cameraCapture: async (file, options = {}) => {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      Object.keys(options).forEach(key => {
-        formData.append(key, options[key]);
-      });
-
+    cameraCapture: async (formData) => {
       return await this.request(API_ENDPOINTS.FILES.CAMERA_CAPTURE, {
         method: 'POST',
+        headers: {}, // Let browser set Content-Type for FormData
         body: formData,
-        headers: {},
       });
     },
 
     delete: async (filePath) => {
-      const endpoint = API_ENDPOINTS.FILES.DELETE.replace(':path', encodeURIComponent(filePath));
-      return await this.delete(endpoint);
+      return await this.delete(API_ENDPOINTS.FILES.DELETE.replace(':path', encodeURIComponent(filePath)));
     },
 
     list: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.FILES.LIST, params);
-      return data || { files: [] };
+      return await this.get(API_ENDPOINTS.FILES.LIST, params);
     },
 
-    getInfo: async (filePath) => {
-      const data = await this.get(API_ENDPOINTS.FILES.INFO, { path: filePath });
-      return data || { file: null };
+    getInfo: async () => {
+      return await this.get(API_ENDPOINTS.FILES.INFO);
+    },
+
+    validate: async (fileUrl) => {
+      return await this.get(`${API_ENDPOINTS.FILES.VALIDATE}?file_url=${encodeURIComponent(fileUrl)}`);
+    },
+
+    getCameraStatus: async () => {
+      return await this.get(API_ENDPOINTS.FILES.CAMERA_STATUS);
     },
   };
 
-  // === ANALYTICS METHODS ===
-  analytics = {
-    getOverview: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ANALYTICS.OVERVIEW, params);
-      // Return safe default structure to prevent undefined errors
-      return data || {
-        total_issues: 0,
-        pending_issues: 0,
-        resolved_issues: 0,
-        in_progress_issues: 0,
-        active_users: 0,
-        total_users: 0,
-        department_stats: [],
-        monthly_trends: [],
-        critical_issues: 0,
-        average_resolution_time: 0
-      };
-    },
-
-    getIssueAnalytics: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ANALYTICS.ISSUES, params);
-      return data || { analytics: {} };
-    },
-
-    getDepartmentAnalytics: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ANALYTICS.DEPARTMENTS, params);
-      return data || { departments: [] };
+  // ===== DASHBOARD API ===== 
+  dashboard = {
+    getOverview: async () => {
+      try {
+        return await this.get(API_ENDPOINTS.DASHBOARD.OVERVIEW);
+      } catch (error) {
+        // Fallback for missing dashboard endpoint
+        console.warn('Dashboard overview endpoint not available, using fallback data');
+        return {
+          totalIssues: 0,
+          openIssues: 0,
+          inProgressIssues: 0,
+          resolvedIssues: 0,
+          recentActivity: [],
+          stats: {
+            thisMonth: 0,
+            lastMonth: 0,
+            growth: 0
+          }
+        };
+      }
     },
 
     getTrends: async (params = {}) => {
-      const data = await this.get(API_ENDPOINTS.ANALYTICS.TRENDS, params);
-      return data || { trends: [] };
+      try {
+        return await this.get(API_ENDPOINTS.DASHBOARD.TRENDS, params);
+      } catch (error) {
+        console.warn('Dashboard trends endpoint not available, using fallback data');
+        return { trends: [] };
+      }
+    },
+
+    getActivity: async (params = {}) => {
+      try {
+        return await this.get(API_ENDPOINTS.DASHBOARD.ACTIVITY, params);
+      } catch (error) {
+        console.warn('Dashboard activity endpoint not available, using fallback data');
+        return { activities: [] };
+      }
     },
   };
 
-  // === LEGACY METHOD ALIASES FOR BACKWARD COMPATIBILITY ===
+  // ===== ANALYTICS API =====
+  analytics = {
+    getOverview: async (params = {}) => {
+      return await this.get(API_ENDPOINTS.ANALYTICS.OVERVIEW, params);
+    },
+
+    getTrends: async (params = {}) => {
+      return await this.get(API_ENDPOINTS.ANALYTICS.TRENDS, params);
+    },
+
+    getDepartments: async (params = {}) => {
+      return await this.get(API_ENDPOINTS.ANALYTICS.DEPARTMENTS, params);
+    },
+
+    getPerformance: async (params = {}) => {
+      return await this.get(API_ENDPOINTS.ANALYTICS.PERFORMANCE, params);
+    },
+  };
+
+  // ===== LEGACY METHOD ALIASES FOR BACKWARD COMPATIBILITY =====
   // These methods allow existing components to work without changes
   getIssues = async (params = {}) => {
     return await this.issues.list(params);
   };
 
-  getUsers = async (params = {}) => {
-    return await this.users.list(params);
-  };
-
-  getAssignments = async (params = {}) => {
+  getMyAssignments = async (params = {}) => {
     return await this.assignments.list(params);
   };
 
-  getUpdates = async (params = {}) => {
-    return await this.updates.getRecent(params);
-  };
-
-  getDashboardOverview = async (params = {}) => {
-    return await this.analytics.getOverview(params);
-  };
-
-  getDashboardStats = async (params = {}) => {
-    return await this.analytics.getOverview(params);
-  };
-
-  getSystemStats = async (params = {}) => {
-    // Return safe defaults since this endpoint doesn't exist
-    return {
-      uptime: '99.9%',
-      response_time: '42ms',
-      api_calls_per_hour: 1200,
-      database_health: 'good',
-      cache_hit_rate: '85%'
-    };
-  };
-
-  // Additional legacy methods that might be used
   createIssue = async (issueData) => {
     return await this.issues.create(issueData);
+  };
+
+  createIssueWithImage = async (formData) => {
+    return await this.issues.createWithImage(formData);
   };
 
   updateIssue = async (issueId, updateData) => {
@@ -527,6 +514,65 @@ class ApiService {
   searchIssues = async (searchParams) => {
     return await this.issues.search(searchParams);
   };
+
+  getIssueStats = async () => {
+    return await this.issues.getStats();
+  };
+
+  getNearbyIssues = async (params) => {
+    return await this.issues.getNearby(params);
+  };
+
+  uploadImage = async (formData) => {
+    return await this.files.uploadImage(formData);
+  };
+
+  getUsers = async (params = {}) => {
+    return await this.users.list(params);
+  };
+
+  getAssignments = async (params = {}) => {
+    return await this.assignments.list(params);
+  };
+
+  createAssignment = async (assignmentData) => {
+    return await this.assignments.create(assignmentData);
+  };
+
+  updateAssignment = async (assignmentId, updateData) => {
+    return await this.assignments.update(assignmentId, updateData);
+  };
+
+  getUpdates = async (params = {}) => {
+    return await this.updates.getRecent(params);
+  };
+
+  createUpdate = async (updateData) => {
+    return await this.updates.create(updateData);
+  };
+
+  getDashboardOverview = async (params = {}) => {
+    return await this.dashboard.getOverview(params);
+  };
+
+  getDashboardStats = async (params = {}) => {
+    return await this.dashboard.getOverview(params);
+  };
+
+  getAnalytics = async (params = {}) => {
+    return await this.analytics.getOverview(params);
+  };
+
+  // Safe fallback for system stats (not implemented in backend)
+  getSystemStats = async () => {
+    return {
+      uptime: '99.9%',
+      response_time: '42ms',
+      api_calls_per_hour: 1200,
+      database_health: 'good',
+      cache_hit_rate: '85%'
+    };
+  };
 }
 
 // Create and export singleton instance
@@ -541,5 +587,6 @@ export const {
   updates: UpdatesService,
   users: UsersService,
   files: FilesService,
+  dashboard: DashboardService,
   analytics: AnalyticsService,
 } = apiService;

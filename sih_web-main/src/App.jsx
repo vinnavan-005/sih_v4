@@ -1,74 +1,78 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import ProtectedRoute, { AdminRoute, StaffRoute, AllRolesRoute } from './components/common/ProtectedRoute';
-import { AuthProvider } from './context/AuthContext';
 import { useAuth } from './context/AuthContext';
-import { ROLES } from './utils/constants';
+import AuthProvider from './context/AuthContext';
+import ErrorBoundary from './components/common/ErrorBoundary';
+import ProtectedRoute, { 
+  AdminRoute, 
+  StaffRoute, 
+  SupervisorRoute, 
+  AllRolesRoute,
+  AdminOrStaffRoute 
+} from './components/common/ProtectedRoute';
 
-// Auth components
+// Import components
 import Login from './components/auth/Login';
 import Signup from './components/auth/Signup';
-
-// Dashboard components
 import AdminDashboard from './components/dashboards/AdminDashboard';
 import StaffDashboard from './components/dashboards/StaffDashboard';
 import SupervisorDashboard from './components/dashboards/SupervisorDashboard';
-
-// Feature components
 import IssueList from './components/issues/IssueList';
 import IssueDetails from './components/issues/IssueDetails';
 import Analytics from './components/analytics/Analytics';
 import Escalation from './components/escalation/Escalation';
-import Settings from './components/settings/Settings';
 import TaskAssignment from './components/tasks/TaskAssignment';
+import Settings from './components/settings/Settings';
+import Profile from './components/profile/Profile';
 
-// Error boundary component
-import ErrorBoundary from './components/common/ErrorBoundary';
+// Import constants - FIXED to use backend roles
+import { ROLES } from './utils/constants';
 
-// Import global styles
-import './index.css';
-
-// Notification component for global alerts
-const GlobalNotification = ({ message, type, onClose }) => {
-  useEffect(() => {
-    const timer = setTimeout(onClose, 5000);
-    return () => clearTimeout(timer);
-  }, [onClose]);
-
-  const typeClasses = {
-    success: 'bg-green-50 border-green-200 text-green-800',
-    error: 'bg-red-50 border-red-200 text-red-800',
-    warning: 'bg-yellow-50 border-yellow-200 text-yellow-800',
-    info: 'bg-blue-50 border-blue-200 text-blue-800'
-  };
-
-  return (
-    <div className={`fixed top-4 right-4 p-4 rounded-md border max-w-md ${typeClasses[type]} z-50`}>
-      <div className="flex justify-between items-start">
-        <p className="text-sm font-medium">{message}</p>
-        <button 
-          onClick={onClose}
-          className="ml-4 text-gray-400 hover:text-gray-600"
-        >
-          <span className="sr-only">Close</span>
-          &#x2715;
-        </button>
-      </div>
-    </div>
-  );
-};
-
-// Root app component with routing
+// App Routes component
 const AppRoutes = () => {
   const { currentUser } = useAuth();
 
   return (
     <Routes>
       {/* Public routes */}
-      <Route path="/login" element={<Login />} />
-      <Route path="/signup" element={<Signup />} />
+      <Route 
+        path="/login" 
+        element={
+          currentUser ? (
+            <Navigate 
+              to={
+                currentUser.role === ROLES.ADMIN ? '/admin-dashboard' :
+                currentUser.role === ROLES.STAFF ? '/staff-dashboard' :
+                currentUser.role === ROLES.SUPERVISOR ? '/supervisor-dashboard' :
+                '/login'
+              } 
+              replace 
+            />
+          ) : (
+            <Login />
+          )
+        } 
+      />
+      <Route 
+        path="/signup" 
+        element={
+          currentUser ? (
+            <Navigate 
+              to={
+                currentUser.role === ROLES.ADMIN ? '/admin-dashboard' :
+                currentUser.role === ROLES.STAFF ? '/staff-dashboard' :
+                currentUser.role === ROLES.SUPERVISOR ? '/supervisor-dashboard' :
+                '/login'
+              } 
+              replace 
+            />
+          ) : (
+            <Signup />
+          )
+        } 
+      />
 
-      {/* Protected dashboard routes with standardized roles */}
+      {/* Protected dashboard routes - FIXED ROLES */}
       <Route 
         path="/admin-dashboard" 
         element={
@@ -88,9 +92,9 @@ const AppRoutes = () => {
       <Route 
         path="/supervisor-dashboard" 
         element={
-          <ProtectedRoute allowedRoles={[ROLES.SUPERVISOR]}>
+          <SupervisorRoute>
             <SupervisorDashboard />
-          </ProtectedRoute>
+          </SupervisorRoute>
         } 
       />
 
@@ -122,17 +126,17 @@ const AppRoutes = () => {
       <Route 
         path="/escalation" 
         element={
-          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.STAFF]}>
+          <AdminOrStaffRoute>
             <Escalation />
-          </ProtectedRoute>
+          </AdminOrStaffRoute>
         } 
       />
       <Route 
         path="/task-assignment" 
         element={
-          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.STAFF]}>
+          <AdminOrStaffRoute>
             <TaskAssignment />
-          </ProtectedRoute>
+          </AdminOrStaffRoute>
         } 
       />
       <Route 
@@ -143,8 +147,16 @@ const AppRoutes = () => {
           </AdminRoute>
         } 
       />
+      <Route 
+        path="/profile" 
+        element={
+          <AllRolesRoute>
+            <Profile />
+          </AllRolesRoute>
+        } 
+      />
 
-      {/* Default redirect based on user role */}
+      {/* Default redirect based on user role - FIXED */}
       <Route 
         path="/" 
         element={

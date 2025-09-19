@@ -8,7 +8,7 @@ export const useIssues = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  // Fetch issues from backend - UPDATED to use new API structure
+  // Fetch issues from backend - FIXED to use consistent API methods
   const fetchIssues = async (filters = {}) => {
     if (!currentUser) return { issues: [], pagination: null };
     
@@ -16,10 +16,14 @@ export const useIssues = () => {
     setError(null);
     
     try {
-      // Changed from apiService.issues.list() to apiService.getIssues()
-      const data = await apiService.getIssues(filters);
-      setIssues(data.issues || []);
-      return data;
+      // Use the standardized API method
+      const data = await apiService.issues.list(filters);
+      const issuesList = data.issues || data || [];
+      setIssues(issuesList);
+      return {
+        issues: issuesList,
+        pagination: data.pagination || null
+      };
     } catch (err) {
       setError(err.message);
       console.error('Failed to fetch issues:', err);
@@ -29,11 +33,11 @@ export const useIssues = () => {
     }
   };
 
-  // Create new issue - UPDATED
+  // Create new issue - FIXED
   const createIssue = async (issueData) => {
     try {
-      // Changed from apiService.issues.create() to apiService.createIssue()
-      const data = await apiService.createIssue(issueData);
+      setError(null);
+      const data = await apiService.issues.create(issueData);
       await fetchIssues(); // Refresh list
       return data;
     } catch (err) {
@@ -42,12 +46,11 @@ export const useIssues = () => {
     }
   };
 
-  // Create issue with image - UPDATED
+  // Create issue with image - FIXED
   const createIssueWithImage = async (formData) => {
     try {
-      // This method doesn't exist in new API, using regular createIssue
-      // You may need to handle image upload separately
-      const data = await apiService.createIssue(formData);
+      setError(null);
+      const data = await apiService.issues.createWithImage(formData);
       await fetchIssues(); // Refresh list
       return data;
     } catch (err) {
@@ -56,14 +59,14 @@ export const useIssues = () => {
     }
   };
 
-  // Update issue - UPDATED
+  // Update issue - FIXED
   const updateIssue = async (issueId, updateData) => {
     try {
-      // Changed from apiService.issues.update() to apiService.updateIssue()
-      const data = await apiService.updateIssue(issueId, updateData);
+      setError(null);
+      const data = await apiService.issues.update(issueId, updateData);
       // Update local state
       setIssues(prev => prev.map(issue => 
-        issue.id === parseInt(issueId) ? data : issue
+        issue.id === parseInt(issueId) ? { ...issue, ...data } : issue
       ));
       return data;
     } catch (err) {
@@ -72,49 +75,65 @@ export const useIssues = () => {
     }
   };
 
-  // Get single issue - UPDATED
+  // Get single issue - FIXED
   const getIssue = async (issueId) => {
     try {
-      // Changed from apiService.issues.getById() to apiService.getIssue()
-      return await apiService.getIssue(issueId);
+      setError(null);
+      return await apiService.issues.getById(issueId);
     } catch (err) {
       setError(err.message);
       throw err;
     }
   };
 
-  // Vote on issue - UPDATED
+  // Vote on issue - FIXED
   const voteIssue = async (issueId) => {
     try {
-      // Changed from apiService.issues.vote() to apiService.voteOnIssue()
-      await apiService.voteOnIssue(issueId, 'upvote');
-      await fetchIssues(); // Refresh to get updated vote count
+      setError(null);
+      const data = await apiService.issues.vote(issueId);
+      // Update local state to reflect vote
+      setIssues(prev => prev.map(issue => 
+        issue.id === parseInt(issueId) 
+          ? { ...issue, votes: (issue.votes || 0) + 1, userHasVoted: true }
+          : issue
+      ));
+      return data;
     } catch (err) {
       setError(err.message);
       throw err;
     }
   };
 
-  // Remove vote from issue - UPDATED
+  // Remove vote from issue - FIXED
   const removeVote = async (issueId) => {
     try {
-      // Changed from apiService.issues.removeVote() to apiService.voteOnIssue()
-      await apiService.voteOnIssue(issueId, 'downvote');
-      await fetchIssues(); // Refresh to get updated vote count
+      setError(null);
+      const data = await apiService.issues.removeVote(issueId);
+      // Update local state to reflect vote removal
+      setIssues(prev => prev.map(issue => 
+        issue.id === parseInt(issueId) 
+          ? { ...issue, votes: Math.max((issue.votes || 0) - 1, 0), userHasVoted: false }
+          : issue
+      ));
+      return data;
     } catch (err) {
       setError(err.message);
       throw err;
     }
   };
 
-  // Search issues - UPDATED
+  // Search issues - FIXED
   const searchIssues = async (searchParams) => {
-    setLoading(true);
     try {
-      // Changed from apiService.issues.search() to apiService.searchIssues()
-      const data = await apiService.searchIssues(searchParams);
-      setIssues(data.issues || []);
-      return data;
+      setError(null);
+      setLoading(true);
+      const data = await apiService.issues.search(searchParams);
+      const searchResults = data.issues || data || [];
+      setIssues(searchResults);
+      return {
+        issues: searchResults,
+        pagination: data.pagination || null
+      };
     } catch (err) {
       setError(err.message);
       throw err;
@@ -123,42 +142,44 @@ export const useIssues = () => {
     }
   };
 
-  // Get issue statistics - UPDATED
+  // Get issue statistics - FIXED
   const getIssueStats = async () => {
     try {
-      // Changed from apiService.issues.getStats() to apiService.getIssueStats()
-      return await apiService.getIssueStats();
+      setError(null);
+      return await apiService.issues.getStats();
     } catch (err) {
-      console.error('Failed to fetch issue stats:', err);
-      return null;
+      setError(err.message);
+      throw err;
     }
   };
 
-  // Upload image - UPDATED
+  // Upload image for issue - FIXED
   const uploadImage = async (formData) => {
     try {
-      // Changed from apiService.issues.uploadImage() to apiService.uploadImage()
-      return await apiService.uploadImage(formData);
+      setError(null);
+      return await apiService.issues.uploadImage(formData);
     } catch (err) {
       setError(err.message);
       throw err;
     }
   };
 
-  // Get nearby issues - NEW method added
+  // Get nearby issues - FIXED
   const getNearbyIssues = async (params = {}) => {
     try {
-      return await apiService.getNearbyIssues(params);
+      setError(null);
+      return await apiService.issues.getNearby(params);
     } catch (err) {
       setError(err.message);
       throw err;
     }
   };
 
-  // Delete issue - NEW method added  
+  // Delete issue - FIXED
   const deleteIssue = async (issueId) => {
     try {
-      const data = await apiService.deleteIssue(issueId);
+      setError(null);
+      const data = await apiService.issues.delete(issueId);
       // Remove from local state
       setIssues(prev => prev.filter(issue => issue.id !== parseInt(issueId)));
       return data;
@@ -168,6 +189,36 @@ export const useIssues = () => {
     }
   };
 
+  // Filter issues by status
+  const filterIssuesByStatus = (status) => {
+    return issues.filter(issue => issue.status === status);
+  };
+
+  // Filter issues by department
+  const filterIssuesByDepartment = (department) => {
+    return issues.filter(issue => issue.department === department);
+  };
+
+  // Filter issues by priority
+  const filterIssuesByPriority = (priority) => {
+    return issues.filter(issue => issue.priority === priority);
+  };
+
+  // Get issues assigned to current user (for supervisors)
+  const getMyAssignedIssues = () => {
+    if (!currentUser) return [];
+    return issues.filter(issue => 
+      issue.assignedTo === currentUser.email || 
+      issue.assignedTo === currentUser.id
+    );
+  };
+
+  // Get issues from current user's department (for staff)
+  const getDepartmentIssues = () => {
+    if (!currentUser || !currentUser.department) return [];
+    return issues.filter(issue => issue.department === currentUser.department);
+  };
+
   // Initial fetch on mount
   useEffect(() => {
     if (currentUser) {
@@ -175,22 +226,49 @@ export const useIssues = () => {
     }
   }, [currentUser]);
 
+  // Clear errors when user changes
+  useEffect(() => {
+    setError(null);
+  }, [currentUser]);
+
   return {
+    // Data
     issues,
     loading,
     error,
+    
+    // Core CRUD operations
     fetchIssues,
     createIssue,
     createIssueWithImage,
     updateIssue,
+    deleteIssue,
     getIssue,
+    
+    // Interaction methods
     voteIssue,
     removeVote,
+    
+    // Search and statistics
     searchIssues,
     getIssueStats,
-    uploadImage,
     getNearbyIssues,
-    deleteIssue,
+    
+    // File operations
+    uploadImage,
+    
+    // Filtering utilities
+    filterIssuesByStatus,
+    filterIssuesByDepartment,
+    filterIssuesByPriority,
+    getMyAssignedIssues,
+    getDepartmentIssues,
+    
+    // Computed values
+    totalIssues: issues.length,
+    openIssues: issues.filter(issue => issue.status === 'open').length,
+    inProgressIssues: issues.filter(issue => issue.status === 'in_progress').length,
+    resolvedIssues: issues.filter(issue => issue.status === 'resolved').length,
   };
 };
 

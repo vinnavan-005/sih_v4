@@ -1,245 +1,178 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from "../../context/AuthContext";
-import { useLocalStorage } from '../../hooks/useLocalStorage';
 import Header from '../common/Header';
+import { PageLoader, ErrorState } from '../common/LoadingSpinner';
 import { 
   AlertTriangle, 
   Clock, 
-  Calendar, 
-  Building, 
+  ArrowUp, 
+  CheckCircle, 
   User, 
-  CheckCircle,
-  FileText,
-  TrendingUp 
+  Calendar,
+  MapPin,
+  Building,
+  Search,
+  Filter,
+  RefreshCw,
+  Send,
+  MessageSquare,
 } from 'lucide-react';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://192.168.1.103:8000';
+import apiService from '../../services/api';
+import { ROLES } from '../../utils/constants';
 
 const Escalation = () => {
-  const { currentUser, token } = useAuth();
-  const [escalationLogs, setEscalationLogs] = useLocalStorage('escalationLogs', []);
+  const { currentUser } = useAuth();
   const [issues, setIssues] = useState([]);
-  const [assignments, setAssignments] = useState([]);
-  const [overdueIssues, setOverdueIssues] = useState([]);
-  const [stats, setStats] = useState({
-    totalOverdue: 0,
-    criticalOverdue: 0,
-    averageOverdueDays: 0
-  });
+  const [escalatedIssues, setEscalatedIssues] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [priorityFilter, setPriorityFilter] = useState('');
+  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [escalationReason, setEscalationReason] = useState('');
+  const [showEscalationModal, setShowEscalationModal] = useState(false);
 
   useEffect(() => {
-    if (currentUser && token) {
+    if (currentUser) {
       fetchData();
     }
-  }, [currentUser, token]);
-
-  const apiRequest = async (url, options = {}) => {
-    const config = {
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        ...options.headers,
-      },
-      ...options,
-    };
-
-    const response = await fetch(`${API_BASE_URL}${url}`, config);
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail || `HTTP error! status: ${response.status}`);
-    }
-    
-    return response.json();
-  };
+  }, [currentUser]);
 
   const fetchData = async () => {
     try {
       setLoading(true);
-      
-      // Fetch issues and assignments
-      const [issuesData, assignmentsData] = await Promise.all([
-        apiRequest('/api/issues/'),
-        apiRequest('/api/assignments/')
-      ]);
+      setError(null);
 
-      setIssues(issuesData.issues || []);
-      setAssignments(assignmentsData.assignments || []);
+      // Fetch issues that might need escalation
+      const issuesResponse = await apiService.issues.list({ 
+        status: 'open,in_progress',
+        per_page: 50 
+      });
+
+      const allIssues = issuesResponse?.issues || issuesResponse?.data || [];
       
-      // Calculate overdue issues
-      calculateOverdueIssues(issuesData.issues || [], assignmentsData.assignments || []);
-      
-    } catch (error) {
-      console.error('Failed to fetch escalation data:', error);
+      // Filter for issues that might need escalation
+      const needsEscalation = allIssues.filter(issue => {
+        const createdDate = new Date(issue.created_at);
+        const daysSinceCreated = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Logic for escalation candidates:
+        // - Open for more than 7 days
+        // - High priority and open for more than 3 days
+        // - Critical priority and open for more than 1 day
+        return (
+          (daysSinceCreated > 7) ||
+          (issue.priority === 'high' && daysSinceCreated > 3) ||
+          (issue.priority === 'critical' && daysSinceCreated > 1) ||
+          (issue.status === 'escalated')
+        );
+      });
+
+      setIssues(needsEscalation);
+
+      // Separate already escalated issues
+      const alreadyEscalated = needsEscalation.filter(issue => issue.status === 'escalated');
+      setEscalatedIssues(alreadyEscalated);
+
+    } catch (err) {
+      console.error('Failed to fetch escalation data:', err);
+      setError(err.message || 'Failed to load escalation data');
     } finally {
       setLoading(false);
     }
   };
 
-  const calculateOverdueIssues = (issuesData, assignmentsData) => {
-    const today = new Date();
-    const overdue = [];
-
-    issuesData.forEach(issue => {
-      if (issue.status === 'resolved') return;
-
-      let isOverdue = false;
-      let overdueDays = 0;
-      let deadline = null;
-
-      // Calculate deadline based on creation date (SLA: 3 days for regular issues)
-      const created = new Date(issue.created_at);
-      const slaDeadline = new Date(created);
-      
-      // Adjust SLA based on priority
-      const slaHours = issue.priority === 'high' ? 24 : 
-                      issue.priority === 'medium' ? 48 : 72; // 1, 2, or 3 days
-      
-      slaDeadline.setHours(slaDeadline.getHours() + slaHours);
-      
-      if (slaDeadline < today) {
-        isOverdue = true;
-        overdueDays = Math.ceil((today - slaDeadline) / (1000 * 60 * 60 * 24));
-        deadline = slaDeadline;
-      }
-
-      if (isOverdue) {
-        // Get assignment info
-        const assignment = assignmentsData.find(a => a.issue_id === issue.id);
-        
-        overdue.push({
-          ...issue,
-          overdueDays,
-          deadline: deadline ? deadline.toDateString() : 'N/A',
-          assignedTo: assignment ? assignment.staff_name : 'Unassigned',
-          assignedToId: assignment ? assignment.staff_id : null,
-          severity: overdueDays > 7 ? 'critical' : overdueDays > 3 ? 'high' : 'medium',
-          escalated: issue.escalated || false
-        });
-      }
-    });
-
-    // Sort by overdue days (most overdue first)
-    overdue.sort((a, b) => b.overdueDays - a.overdueDays);
-
-    setOverdueIssues(overdue);
-
-    // Calculate stats
-    const totalOverdue = overdue.length;
-    const criticalOverdue = overdue.filter(i => i.severity === 'critical').length;
-    const averageOverdueDays = totalOverdue > 0 
-      ? Math.round(overdue.reduce((sum, i) => sum + i.overdueDays, 0) / totalOverdue)
-      : 0;
-
-    setStats({
-      totalOverdue,
-      criticalOverdue,
-      averageOverdueDays
-    });
+  const handleEscalate = async (issue) => {
+    setSelectedIssue(issue);
+    setShowEscalationModal(true);
   };
 
-  const addEscalationLog = (message, issueId = null) => {
-    const logEntry = {
-      id: Date.now(),
-      message,
-      timestamp: new Date().toLocaleString(),
-      user: currentUser.full_name || currentUser.email,
-      issueId,
-      department: currentUser.department || 'General'
-    };
-
-    setEscalationLogs(prev => [logEntry, ...prev]);
-  };
-
-  const handleEscalateIssue = async (issue) => {
-    if (!canEscalate()) {
-      alert('You do not have permission to escalate issues.');
+  const submitEscalation = async () => {
+    if (!selectedIssue || !escalationReason.trim()) {
+      alert('Please provide a reason for escalation');
       return;
     }
 
-    const escalateTo = prompt('Escalate to (enter supervisor/manager name or email):');
-    if (escalateTo && escalateTo.trim()) {
-      try {
-        // Update issue to mark as escalated
-        await apiRequest(`/api/issues/${issue.id}`, {
-          method: 'PUT',
-          body: JSON.stringify({
-            escalated: true,
-            escalated_to: escalateTo.trim(),
-            updated_at: new Date().toISOString()
-          }),
-        });
+    try {
+      setActionLoading(selectedIssue.id);
 
-        const message = `Issue #${issue.id} (${issue.title}) escalated to ${escalateTo} - ${issue.overdueDays} days overdue`;
-        addEscalationLog(message, issue.id);
-        
-        alert(`Issue escalated to ${escalateTo}`);
-        
-        // Refresh data
-        fetchData();
-        
-      } catch (error) {
-        alert('Failed to escalate issue: ' + error.message);
-      }
+      // Update issue status to escalated
+      await apiService.issues.update(selectedIssue.id, {
+        status: 'escalated',
+        priority: 'critical'
+      });
+
+      // Add an update explaining the escalation
+      await apiService.updates.create({
+        issue_id: selectedIssue.id,
+        update_text: `Issue escalated: ${escalationReason}`,
+        status: 'escalated',
+        added_by: currentUser.id
+      });
+
+      // Refresh data
+      await fetchData();
+      
+      // Close modal and reset
+      setShowEscalationModal(false);
+      setEscalationReason('');
+      setSelectedIssue(null);
+      
+      alert('Issue has been escalated successfully!');
+
+    } catch (err) {
+      console.error('Escalation failed:', err);
+      alert('Failed to escalate issue: ' + err.message);
+    } finally {
+      setActionLoading(null);
     }
   };
 
-  const handleBulkEscalate = async () => {
-    if (!canEscalate()) {
-      alert('You do not have permission to escalate issues.');
-      return;
-    }
+  const handleResolveEscalation = async (issueId) => {
+    try {
+      setActionLoading(issueId);
 
-    const criticalIssues = overdueIssues.filter(i => i.severity === 'critical' && !i.escalated);
-    
-    if (criticalIssues.length === 0) {
-      alert('No critical overdue issues to escalate.');
-      return;
-    }
+      // Update issue status back to in_progress
+      await apiService.issues.update(issueId, {
+        status: 'in_progress'
+      });
 
-    const confirmation = confirm(`Escalate ${criticalIssues.length} critical overdue issues?`);
-    if (confirmation) {
-      try {
-        for (const issue of criticalIssues) {
-          await apiRequest(`/api/issues/${issue.id}`, {
-            method: 'PUT',
-            body: JSON.stringify({
-              escalated: true,
-              escalated_to: 'System Auto-Escalation',
-              updated_at: new Date().toISOString()
-            }),
-          });
+      // Add update
+      await apiService.updates.create({
+        issue_id: issueId,
+        update_text: 'Escalation resolved. Issue returned to normal workflow.',
+        status: 'info',
+        added_by: currentUser.id
+      });
 
-          const message = `Issue #${issue.id} (${issue.title}) auto-escalated - ${issue.overdueDays} days overdue (Critical)`;
-          addEscalationLog(message, issue.id);
-        }
+      await fetchData();
+      alert('Escalation resolved successfully!');
 
-        alert(`${criticalIssues.length} critical issues escalated successfully.`);
-        fetchData();
-        
-      } catch (error) {
-        alert('Failed to bulk escalate: ' + error.message);
-      }
+    } catch (err) {
+      console.error('Failed to resolve escalation:', err);
+      alert('Failed to resolve escalation: ' + err.message);
+    } finally {
+      setActionLoading(null);
     }
   };
 
-  const canEscalate = () => {
-    return currentUser?.role === 'admin' || currentUser?.role === 'supervisor';
+  const getDaysOverdue = (createdAt) => {
+    const created = new Date(createdAt);
+    const now = new Date();
+    return Math.floor((now - created) / (1000 * 60 * 60 * 24));
   };
 
-  const canViewAllIssues = () => {
-    return currentUser?.role === 'admin';
-  };
-
-  const getSeverityColor = (severity) => {
-    switch (severity) {
+  const getPriorityColor = (priority) => {
+    switch (priority) {
       case 'critical':
         return 'bg-red-100 text-red-800 border-red-200';
       case 'high':
         return 'bg-orange-100 text-orange-800 border-orange-200';
       case 'medium':
         return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      case 'low':
+        return 'bg-green-100 text-green-800 border-green-200';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200';
     }
@@ -247,41 +180,43 @@ const Escalation = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'resolved':
-        return 'bg-green-100 text-green-800';
+      case 'escalated':
+        return 'bg-red-100 text-red-800 border-red-200';
       case 'in_progress':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'pending':
-        return 'bg-red-100 text-red-800';
+        return 'bg-blue-100 text-blue-800 border-blue-200';
+      case 'open':
+        return 'bg-yellow-100 text-yellow-800 border-yellow-200';
       default:
-        return 'bg-gray-100 text-gray-800';
+        return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
 
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    return new Date(dateString).toLocaleDateString();
-  };
-
-  const StatCard = ({ title, value, icon: Icon, color, suffix = '' }) => (
-    <div className="bg-white rounded-xl p-6 shadow-sm border-l-4" style={{ borderLeftColor: color }}>
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-gray-600 text-sm font-medium">{title}</p>
-          <p className="text-3xl font-bold text-gray-900 mt-2">{value}{suffix}</p>
-        </div>
-        <Icon className="h-8 w-8" style={{ color }} />
-      </div>
-    </div>
-  );
+  const filteredIssues = issues.filter(issue => {
+    const matchesSearch = issue.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         issue.description?.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesPriority = !priorityFilter || issue.priority === priorityFilter;
+    return matchesSearch && matchesPriority;
+  });
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50">
-        <Header title="Escalation & SLA Monitor" />
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <span className="ml-2 text-gray-600">Loading escalation data...</span>
+        <Header title="Issue Escalation" />
+        <PageLoader text="Loading escalation data..." />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header title="Issue Escalation" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <ErrorState
+            title="Failed to load escalation data"
+            message={error}
+            onRetry={fetchData}
+          />
         </div>
       </div>
     );
@@ -289,92 +224,142 @@ const Escalation = () => {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <Header title="Escalation & SLA Monitor" />
+      <Header title="Issue Escalation" />
       
-      <main className="p-6">
-        {/* Stats Cards */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-          <StatCard
-            title="Total Overdue Issues"
-            value={stats.totalOverdue}
-            icon={AlertTriangle}
-            color="#EF4444"
-          />
-          <StatCard
-            title="Critical Overdue"
-            value={stats.criticalOverdue}
-            icon={TrendingUp}
-            color="#DC2626"
-          />
-          <StatCard
-            title="Average Overdue Days"
-            value={stats.averageOverdueDays}
-            icon={Clock}
-            color="#F59E0B"
-          />
-        </section>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header Section */}
+        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 flex items-center">
+                <AlertTriangle className="h-6 w-6 text-red-500 mr-2" />
+                Issue Escalation Management
+              </h1>
+              <p className="text-gray-600 mt-1">
+                Monitor and manage issues that require escalation due to delays or priority
+              </p>
+            </div>
+            <button
+              onClick={fetchData}
+              disabled={loading}
+              className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
+          </div>
 
-        {/* Bulk Actions */}
-        {canEscalate() && stats.criticalOverdue > 0 && (
-          <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="text-sm font-medium text-red-800">Critical Issues Alert</h3>
-                <p className="text-sm text-red-600 mt-1">
-                  {stats.criticalOverdue} issues are critically overdue and may need immediate attention.
-                </p>
+          {/* Stats */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+              <div className="flex items-center">
+                <Clock className="h-5 w-5 text-yellow-600 mr-2" />
+                <div>
+                  <p className="text-sm text-yellow-600">Needs Escalation</p>
+                  <p className="text-xl font-bold text-yellow-900">
+                    {filteredIssues.filter(i => i.status !== 'escalated').length}
+                  </p>
+                </div>
               </div>
-              <button
-                onClick={handleBulkEscalate}
-                className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors inline-flex items-center"
-              >
-                <TrendingUp className="h-4 w-4 mr-2" />
-                Auto-Escalate Critical
-              </button>
+            </div>
+            
+            <div className="bg-red-50 p-4 rounded-lg border border-red-200">
+              <div className="flex items-center">
+                <ArrowUp className="h-5 w-5 text-red-600 mr-2" />
+                <div>
+                  <p className="text-sm text-red-600">Currently Escalated</p>
+                  <p className="text-xl font-bold text-red-900">{escalatedIssues.length}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+              <div className="flex items-center">
+                <Priority className="h-5 w-5 text-blue-600 mr-2" />
+                <div>
+                  <p className="text-sm text-blue-600">High Priority</p>
+                  <p className="text-xl font-bold text-blue-900">
+                    {filteredIssues.filter(i => i.priority === 'high' || i.priority === 'critical').length}
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Overdue Issues Table */}
-        <section className="bg-white rounded-lg shadow-sm overflow-hidden mb-8">
+        {/* Filters */}
+        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Search Issues
+              </label>
+              <div className="relative">
+                <Search className="h-4 w-4 text-gray-400 absolute left-3 top-3" />
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Search by title or description..."
+                  className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Filter by Priority
+              </label>
+              <select
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">All Priorities</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Issues List */}
+        <div className="bg-white rounded-lg shadow-sm">
           <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-              <Clock className="h-6 w-6 text-red-500 mr-2" />
-              Overdue Issues
+            <h2 className="text-xl font-semibold text-gray-900">
+              Issues Requiring Attention ({filteredIssues.length})
             </h2>
           </div>
           
           <div className="overflow-x-auto">
-            {overdueIssues.length === 0 ? (
+            {filteredIssues.length === 0 ? (
               <div className="text-center py-12">
                 <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-                <p className="text-gray-600 text-lg">No overdue issues</p>
-                <p className="text-sm text-gray-500 mt-2">All issues are within SLA requirements</p>
+                <p className="text-gray-600 text-lg">No issues require escalation</p>
+                <p className="text-sm text-gray-500 mt-2">
+                  All issues are being handled within expected timeframes
+                </p>
               </div>
             ) : (
               <table className="w-full">
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Issue ID
+                      Issue Details
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Title
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Category
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Created
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Overdue (days)
+                      Priority
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Status
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Assigned To
+                      Days Overdue
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Location
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
@@ -382,51 +367,76 @@ const Escalation = () => {
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
-                  {overdueIssues.map((issue) => (
-                    <tr 
-                      key={issue.id} 
-                      className={`hover:bg-gray-50 ${issue.severity === 'critical' ? 'bg-red-50' : ''}`}
-                    >
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                        #{issue.id}
+                  {filteredIssues.map((issue) => (
+                    <tr key={issue.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4">
+                        <div>
+                          <div className="text-sm font-medium text-gray-900">
+                            {issue.title || `Issue #${issue.id}`}
+                          </div>
+                          <div className="text-sm text-gray-500 mt-1">
+                            {issue.description?.substring(0, 100)}
+                            {issue.description?.length > 100 && '...'}
+                          </div>
+                          <div className="flex items-center text-xs text-gray-400 mt-1">
+                            <Calendar className="h-3 w-3 mr-1" />
+                            Created {new Date(issue.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
                       </td>
-                      <td className="px-6 py-4 text-sm text-gray-900 max-w-xs truncate">
-                        {issue.title}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
-                        {issue.category || '-'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {formatDate(issue.created_at)}
-                      </td>
+                      
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-3 py-1 text-xs font-semibold rounded-full border ${getSeverityColor(issue.severity)}`}>
-                          {issue.overdueDays} days
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getPriorityColor(issue.priority)}`}>
+                          {issue.priority || 'medium'}
                         </span>
                       </td>
+                      
                       <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(issue.status)}`}>
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full border ${getStatusColor(issue.status)}`}>
                           {issue.status}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {issue.assignedTo || 'Unassigned'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                        {canEscalate() && !issue.escalated && (
-                          <button
-                            onClick={() => handleEscalateIssue(issue)}
-                            className="bg-red-600 text-white px-3 py-1 rounded text-xs hover:bg-red-700 transition-colors inline-flex items-center"
-                          >
-                            <TrendingUp className="h-3 w-3 mr-1" />
-                            Escalate
-                          </button>
-                        )}
-                        {issue.escalated && (
-                          <span className="inline-flex px-3 py-1 text-xs font-semibold rounded-full bg-orange-100 text-orange-800">
-                            Escalated
+                      
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <Clock className="h-4 w-4 text-red-500 mr-1" />
+                          <span className={`text-sm font-medium ${
+                            getDaysOverdue(issue.created_at) > 7 ? 'text-red-600' : 'text-yellow-600'
+                          }`}>
+                            {getDaysOverdue(issue.created_at)} days
                           </span>
-                        )}
+                        </div>
+                      </td>
+                      
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center text-sm text-gray-500">
+                          <MapPin className="h-4 w-4 mr-1" />
+                          {issue.location || 'Not specified'}
+                        </div>
+                      </td>
+                      
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex space-x-2">
+                          {issue.status === 'escalated' ? (
+                            <button
+                              onClick={() => handleResolveEscalation(issue.id)}
+                              disabled={actionLoading === issue.id}
+                              className="inline-flex items-center px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
+                            >
+                              <CheckCircle className="h-3 w-3 mr-1" />
+                              Resolve
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleEscalate(issue)}
+                              disabled={actionLoading === issue.id}
+                              className="inline-flex items-center px-3 py-1 bg-red-600 text-white text-xs rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
+                            >
+                              <ArrowUp className="h-3 w-3 mr-1" />
+                              Escalate
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -434,54 +444,61 @@ const Escalation = () => {
               </table>
             )}
           </div>
-        </section>
+        </div>
+      </div>
 
-        {/* Escalation Log */}
-        <section className="bg-white rounded-lg shadow-sm p-6">
-          <h2 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-            <FileText className="h-6 w-6 text-blue-500 mr-2" />
-            Escalation Log
-          </h2>
-          
-          {escalationLogs.length === 0 ? (
-            <div className="text-center py-8">
-              <CheckCircle className="h-10 w-10 text-green-500 mx-auto mb-3" />
-              <p className="text-gray-600">No escalations recorded</p>
+      {/* Escalation Modal */}
+      {showEscalationModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 w-full max-w-md mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">
+              Escalate Issue
+            </h3>
+            
+            <div className="mb-4">
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>Issue:</strong> {selectedIssue?.title}
+              </p>
+              <p className="text-sm text-gray-600">
+                <strong>Days overdue:</strong> {selectedIssue && getDaysOverdue(selectedIssue.created_at)}
+              </p>
             </div>
-          ) : (
-            <div className="space-y-4 max-h-96 overflow-y-auto">
-              {escalationLogs
-                .filter(log => 
-                  canViewAllIssues() || 
-                  log.department === currentUser?.department ||
-                  log.user === currentUser?.full_name ||
-                  log.user === currentUser?.email
-                )
-                .map((log) => (
-                <div key={log.id} className="border border-gray-200 rounded-lg p-4 hover:bg-gray-50 transition-colors">
-                  <div className="flex justify-between items-start mb-2">
-                    <div className="flex items-center">
-                      <User className="h-4 w-4 text-gray-400 mr-2" />
-                      <span className="font-medium text-gray-900">{log.user}</span>
-                    </div>
-                    <div className="flex items-center text-sm text-gray-500">
-                      <Calendar className="h-4 w-4 mr-1" />
-                      {log.timestamp}
-                    </div>
-                  </div>
-                  <p className="text-gray-700">{log.message}</p>
-                  {log.department && (
-                    <div className="mt-2 flex items-center text-xs text-gray-500">
-                      <Building className="h-3 w-3 mr-1" />
-                      {log.department}
-                    </div>
-                  )}
-                </div>
-              ))}
+            
+            <div className="mb-6">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Reason for Escalation
+              </label>
+              <textarea
+                value={escalationReason}
+                onChange={(e) => setEscalationReason(e.target.value)}
+                placeholder="Explain why this issue needs to be escalated..."
+                rows={4}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
-          )}
-        </section>
-      </main>
+            
+            <div className="flex space-x-3">
+              <button
+                onClick={submitEscalation}
+                disabled={actionLoading || !escalationReason.trim()}
+                className="flex-1 bg-red-600 text-white py-2 px-4 rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {actionLoading ? 'Escalating...' : 'Escalate Issue'}
+              </button>
+              <button
+                onClick={() => {
+                  setShowEscalationModal(false);
+                  setEscalationReason('');
+                  setSelectedIssue(null);
+                }}
+                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-md hover:bg-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

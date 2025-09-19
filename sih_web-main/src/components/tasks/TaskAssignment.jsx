@@ -14,10 +14,10 @@ import {
   User
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { ROLES, API_ENDPOINTS } from '../../utils/constants';
+import apiService from '../../services/api';
 
 const TaskAssignment = () => {
-  const { currentUser, apiCall } = useAuth();
+  const { currentUser, hasPermission } = useAuth();
   const [pendingIssues, setPendingIssues] = useState([]);
   const [availableStaff, setAvailableStaff] = useState([]);
   const [assignments, setAssignments] = useState([]);
@@ -36,9 +36,9 @@ const TaskAssignment = () => {
       setLoading(true);
       setError(null);
 
-      // Check permissions - FIXED: use standardized roles
-      if (!currentUser || ![ROLES.ADMIN, ROLES.STAFF].includes(currentUser.role)) {
-        setError('Access denied! Administrator or Staff role required.');
+      // Check permissions - using the AuthContext hasPermission method
+      if (!currentUser || !hasPermission('assign-tasks')) {
+        setError('Access denied! Task assignment permission required.');
         return;
       }
 
@@ -61,21 +61,18 @@ const TaskAssignment = () => {
 
   const loadPendingIssues = async () => {
     try {
-      let endpoint = `${API_ENDPOINTS.ISSUES.LIST}?status=pending&per_page=50`;
+      const params = { 
+        status: 'pending', 
+        per_page: 50 
+      };
 
       // Staff can only see issues in their department
-      if (currentUser.role === ROLES.STAFF && currentUser.department) {
-        endpoint += `&department=${encodeURIComponent(currentUser.department)}`;
+      if (currentUser.role === 'staff' && currentUser.department) {
+        params.department = currentUser.department;
       }
 
-      const response = await apiCall(endpoint);
-      
-      if (response.ok) {
-        const data = await response.json();
-        setPendingIssues(data.issues || data.data || []);
-      } else {
-        throw new Error('Failed to fetch pending issues');
-      }
+      const data = await apiService.issues.list(params);
+      setPendingIssues(data.issues || data.data || []);
     } catch (err) {
       console.error('Error loading pending issues:', err);
       setPendingIssues([]);
@@ -84,21 +81,15 @@ const TaskAssignment = () => {
 
   const loadAvailableStaff = async () => {
     try {
-      let endpoint = API_ENDPOINTS.USERS.STAFF;
-
-      // Staff can only see staff in their department
-      if (currentUser.role === ROLES.STAFF && currentUser.department) {
-        endpoint += `?department=${encodeURIComponent(currentUser.department)}`;
-      }
-
-      const response = await apiCall(endpoint);
+      const params = {};
       
-      if (response.ok) {
-        const data = await response.json();
-        setAvailableStaff(data.users || data.data || []);
-      } else {
-        throw new Error('Failed to fetch available staff');
+      // Staff can only see staff in their department  
+      if (currentUser.role === 'staff' && currentUser.department) {
+        params.department = currentUser.department;
       }
+
+      const data = await apiService.users.getStaff(params);
+      setAvailableStaff(data.users || data.data || []);
     } catch (err) {
       console.error('Error loading available staff:', err);
       setAvailableStaff([]);
@@ -107,21 +98,15 @@ const TaskAssignment = () => {
 
   const loadAssignments = async () => {
     try {
-      let endpoint = API_ENDPOINTS.ASSIGNMENTS.LIST;
-
-      // Staff can only see assignments for their department
-      if (currentUser.role === ROLES.STAFF && currentUser.department) {
-        endpoint += `?department=${encodeURIComponent(currentUser.department)}`;
-      }
-
-      const response = await apiCall(endpoint);
+      const params = {};
       
-      if (response.ok) {
-        const data = await response.json();
-        setAssignments(data.assignments || data.data || []);
-      } else {
-        throw new Error('Failed to fetch assignments');
+      // Staff can only see assignments for their department
+      if (currentUser.role === 'staff' && currentUser.department) {
+        params.department = currentUser.department;
       }
+
+      const data = await apiService.assignments.list(params);
+      setAssignments(data.assignments || data.data || []);
     } catch (err) {
       console.error('Error loading assignments:', err);
       setAssignments([]);
@@ -130,26 +115,21 @@ const TaskAssignment = () => {
 
   const loadWorkloadStats = async () => {
     try {
-      const response = await apiCall(API_ENDPOINTS.ASSIGNMENTS.WORKLOAD);
-      
-      if (response.ok) {
-        const data = await response.json();
-        setWorkloadStats(data);
-      }
+      const data = await apiService.get('/api/assignments/stats/workload');
+      setWorkloadStats(data);
     } catch (err) {
       console.error('Error loading workload stats:', err);
-      setWorkloadStats(null);
+      setWorkloadStats({
+        total_assignments: 0,
+        completed_assignments: 0
+      });
     }
   };
 
   const loadRecentUpdates = async () => {
     try {
-      const response = await apiCall(API_ENDPOINTS.UPDATES.RECENT);
-      
-      if (response.ok) {
-        const data = await response.json();
-        setRecentUpdates(data.updates || data.data || []);
-      }
+      const data = await apiService.updates.getRecent({ limit: 10 });
+      setRecentUpdates(data.updates || data.data || []);
     } catch (err) {
       console.error('Error loading recent updates:', err);
       setRecentUpdates([]);
@@ -165,19 +145,10 @@ const TaskAssignment = () => {
         assigned_by: currentUser.id
       };
 
-      const response = await apiCall(API_ENDPOINTS.ASSIGNMENTS.CREATE, {
-        method: 'POST',
-        body: JSON.stringify(assignmentData)
-      });
-
-      if (response.ok) {
-        setMessage('Task assigned successfully!');
-        await loadUserAndData(); // Reload data
-        setTimeout(() => setMessage(''), 3000);
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Failed to assign task');
-      }
+      await apiService.assignments.create(assignmentData);
+      setMessage('Task assigned successfully!');
+      await loadUserAndData(); // Reload data
+      setTimeout(() => setMessage(''), 3000);
     } catch (err) {
       setError(err.message || 'Failed to assign task');
       setTimeout(() => setError(null), 5000);
@@ -186,19 +157,10 @@ const TaskAssignment = () => {
 
   const handleBulkAssign = async (assignments) => {
     try {
-      const response = await apiCall(API_ENDPOINTS.ASSIGNMENTS.BULK_ASSIGN, {
-        method: 'POST',
-        body: JSON.stringify({ assignments })
-      });
-
-      if (response.ok) {
-        setMessage('Bulk assignment completed successfully!');
-        await loadUserAndData();
-        setTimeout(() => setMessage(''), 3000);
-      } else {
-        const errorData = await response.json();
-        throw new Error(errorData.message || 'Bulk assignment failed');
-      }
+      await apiService.post('/api/assignments/bulk-assign', { assignments });
+      setMessage('Bulk assignment completed successfully!');
+      await loadUserAndData();
+      setTimeout(() => setMessage(''), 3000);
     } catch (err) {
       setError(err.message || 'Bulk assignment failed');
       setTimeout(() => setError(null), 5000);
@@ -206,6 +168,7 @@ const TaskAssignment = () => {
   };
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'short',
@@ -219,7 +182,7 @@ const TaskAssignment = () => {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
       in_progress: 'bg-blue-100 text-blue-800',
-      completed: 'bg-green-100 text-green-800',
+      resolved: 'bg-green-100 text-green-800',
       overdue: 'bg-red-100 text-red-800'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
@@ -297,7 +260,17 @@ const TaskAssignment = () => {
       {message && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg">
+            <CheckCircle className="h-5 w-5 inline mr-2" />
             {message}
+          </div>
+        </div>
+      )}
+
+      {error && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="bg-red-50 border border-red-200 text-red-800 px-4 py-3 rounded-lg">
+            <AlertTriangle className="h-5 w-5 inline mr-2" />
+            {error}
           </div>
         </div>
       )}

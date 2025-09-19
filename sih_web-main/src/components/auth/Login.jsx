@@ -1,21 +1,27 @@
 import React, { useState } from 'react';
-import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from "../../context/AuthContext";  
-import { Eye, EyeOff, AlertCircle } from 'lucide-react';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { useAuth } from "../../context/AuthContext";
+import { Eye, EyeOff, Mail, Lock, User, AlertCircle, CheckCircle } from 'lucide-react';
+import { ROLES, getDashboardRoute } from '../../utils/constants';
 
 const Login = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { login, isLoading } = useAuth();
-  
+
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    role: ''
+    role: 'Admin' // Frontend display format
   });
+
   const [showPassword, setShowPassword] = useState(false);
-  const [message, setMessage] = useState('');
+  const [errors, setErrors] = useState({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitMessage, setSubmitMessage] = useState('');
+
+  // Get the intended destination after login
+  const from = location.state?.from?.pathname || null;
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
@@ -23,193 +29,272 @@ const Login = () => {
       ...prev,
       [name]: value
     }));
-    // Clear error message when user starts typing
-    if (message && message.includes('Invalid')) {
-      setMessage('');
+    
+    // Clear field-specific error when user starts typing
+    if (errors[name]) {
+      setErrors(prev => ({
+        ...prev,
+        [name]: ''
+      }));
     }
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+
+    // Email validation
+    if (!formData.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
+      newErrors.email = 'Please enter a valid email address';
+    }
+
+    // Password validation
+    if (!formData.password) {
+      newErrors.password = 'Password is required';
+    } else if (formData.password.length < 6) {
+      newErrors.password = 'Password must be at least 6 characters';
+    }
+
+    // Role validation
+    if (!formData.role) {
+      newErrors.role = 'Please select your role';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    setMessage('');
+    
+    if (!validateForm()) return;
 
-    // Basic validation
-    if (!formData.email || !formData.password || !formData.role) {
-      setMessage('Please fill in all fields');
-      setIsSubmitting(false);
-      return;
-    }
+    setIsSubmitting(true);
+    setSubmitMessage('');
+    setErrors({});
 
     try {
       const result = await login(formData.email, formData.password, formData.role);
       
       if (result.success) {
-        setMessage('Login successful! Redirecting...');
+        setSubmitMessage('Login successful! Redirecting...');
         
-        // Redirect to intended page or role-based dashboard
-        const from = location.state?.from?.pathname;
+        // Determine where to redirect
         let redirectPath;
         
         if (from) {
+          // User was trying to access a specific page
           redirectPath = from;
         } else {
-          // Use the user's actual role from the response for routing
-          const userRole = result.user.role;
-          switch (userRole) {
-            case 'Admin':
-              redirectPath = '/admin-dashboard';
-              break;
-            case 'DepartmentStaff':
-              redirectPath = '/staff-dashboard';
-              break;
-            case 'FieldSupervisor':
-              redirectPath = '/supervisor-dashboard';
-              break;
-            default:
-              redirectPath = '/';
-          }
+          // Default dashboard based on role
+          redirectPath = getDashboardRoute(result.user.role);
         }
         
+        // Small delay to show success message
         setTimeout(() => {
           navigate(redirectPath, { replace: true });
         }, 1000);
+        
       } else {
-        setMessage(result.error || 'Login failed. Please try again.');
+        setErrors({ submit: result.error });
       }
     } catch (error) {
       console.error('Login error:', error);
-      setMessage('Network error. Please check your connection and try again.');
+      setErrors({ submit: 'An unexpected error occurred. Please try again.' });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Determine if form can be submitted
-  const canSubmit = formData.email && formData.password && formData.role && !isSubmitting && !isLoading;
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
-      <div className="max-w-md w-full space-y-8">
-        <div className="bg-white shadow-xl rounded-lg p-8">
-          <div className="text-center mb-8">
-            <h2 className="text-3xl font-bold text-gray-900">Welcome Back</h2>
-            <p className="mt-2 text-gray-600">Please login to continue</p>
-          </div>
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+      <div className="sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="text-center">
+          <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            Civic Connect
+          </h1>
+          <h2 className="text-xl text-gray-600">
+            Sign in to your account
+          </h2>
+        </div>
+      </div>
 
-          <form onSubmit={handleSubmit} className="space-y-6">
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-white py-8 px-4 shadow-lg sm:rounded-lg sm:px-10">
+          <form className="space-y-6" onSubmit={handleSubmit}>
+            {/* Role Selection - FIXED to match backend */}
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
-                Email Address
+              <label htmlFor="role" className="block text-sm font-medium text-gray-700">
+                Login as
               </label>
-              <input
-                id="email"
-                type="email"
-                name="email"
-                value={formData.email}
-                onChange={handleInputChange}
-                placeholder="Enter your email"
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-colors"
-                disabled={isSubmitting}
-              />
+              <div className="mt-1 relative">
+                <select
+                  id="role"
+                  name="role"
+                  value={formData.role}
+                  onChange={handleInputChange}
+                  className={`appearance-none block w-full px-3 py-2 pl-10 border ${
+                    errors.role ? 'border-red-300' : 'border-gray-300'
+                  } rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500`}
+                  required
+                >
+                  <option value="Admin">Administrator</option>
+                  <option value="DepartmentStaff">Department Staff</option>
+                  <option value="FieldSupervisor">Field Supervisor</option>
+                </select>
+                <User className="h-5 w-5 text-gray-400 absolute left-3 top-2.5" />
+              </div>
+              {errors.role && (
+                <p className="mt-1 text-sm text-red-600 flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  {errors.role}
+                </p>
+              )}
             </div>
 
+            {/* Email */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-2">
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700">
+                Email address
+              </label>
+              <div className="mt-1 relative">
+                <input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  value={formData.email}
+                  onChange={handleInputChange}
+                  className={`appearance-none block w-full px-3 py-2 pl-10 border ${
+                    errors.email ? 'border-red-300' : 'border-gray-300'
+                  } rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500`}
+                  placeholder="Enter your email"
+                  required
+                />
+                <Mail className="h-5 w-5 text-gray-400 absolute left-3 top-2.5" />
+              </div>
+              {errors.email && (
+                <p className="mt-1 text-sm text-red-600 flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  {errors.email}
+                </p>
+              )}
+            </div>
+
+            {/* Password */}
+            <div>
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700">
                 Password
               </label>
-              <div className="relative">
+              <div className="mt-1 relative">
                 <input
                   id="password"
-                  type={showPassword ? 'text' : 'password'}
                   name="password"
+                  type={showPassword ? 'text' : 'password'}
+                  autoComplete="current-password"
                   value={formData.password}
                   onChange={handleInputChange}
+                  className={`appearance-none block w-full px-3 py-2 pl-10 pr-10 border ${
+                    errors.password ? 'border-red-300' : 'border-gray-300'
+                  } rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500`}
                   placeholder="Enter your password"
                   required
-                  className="w-full px-4 py-3 pr-12 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-colors"
-                  disabled={isSubmitting}
                 />
+                <Lock className="h-5 w-5 text-gray-400 absolute left-3 top-2.5" />
                 <button
                   type="button"
+                  className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 disabled:opacity-50"
-                  disabled={isSubmitting}
                 >
                   {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
                 </button>
               </div>
-            </div>
-
-            <div>
-              <label htmlFor="role" className="block text-sm font-medium text-gray-700 mb-2">
-                Select Role
-              </label>
-              <select
-                id="role"
-                name="role"
-                value={formData.role}
-                onChange={handleInputChange}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-colors bg-white"
-                disabled={isSubmitting}
-              >
-                <option value="" disabled>Choose your role</option>
-                <option value="Admin">Administrator</option>
-                <option value="DepartmentStaff">Department Staff</option>
-                <option value="FieldSupervisor">Field Supervisor</option>
-              </select>
-            </div>
-
-            <button
-              type="submit"
-              disabled={!canSubmit}
-              className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold flex items-center justify-center"
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                  Logging in...
-                </>
-              ) : (
-                'Login'
+              {errors.password && (
+                <p className="mt-1 text-sm text-red-600 flex items-center">
+                  <AlertCircle className="h-4 w-4 mr-1" />
+                  {errors.password}
+                </p>
               )}
-            </button>
-          </form>
-
-          {message && (
-            <div className={`mt-4 p-3 rounded-lg text-center font-medium flex items-center ${
-              message.includes('successful') 
-                ? 'bg-green-100 text-green-800' 
-                : 'bg-red-100 text-red-800'
-            }`}>
-              {!message.includes('successful') && <AlertCircle className="h-4 w-4 mr-2 flex-shrink-0" />}
-              <span>{message}</span>
             </div>
-          )}
 
-          <div className="mt-6 text-center space-y-2">
-            <p className="text-gray-600">
-              Don't have an account?{' '}
-              <Link to="/signup" className="text-blue-600 hover:text-blue-800 font-medium">
-                Sign Up
-              </Link>
-            </p>
-            <div className="text-sm text-gray-500 space-y-1">
-              <p className="font-medium">Test Accounts:</p>
-              <div className="text-xs space-y-1">
-                <p>Admin: admin@civicconnect.gov / admin123</p>
-                <p>Staff: john.smith@civicconnect.gov / staff123</p>
-                <p>Supervisor: jane.wilson@civicconnect.gov / supervisor123</p>
+            {/* Submit Error */}
+            {errors.submit && (
+              <div className="rounded-md bg-red-50 p-4">
+                <div className="flex">
+                  <AlertCircle className="h-5 w-5 text-red-400" />
+                  <div className="ml-3">
+                    <h3 className="text-sm font-medium text-red-800">
+                      Login Failed
+                    </h3>
+                    <div className="mt-2 text-sm text-red-700">
+                      {errors.submit}
+                    </div>
+                  </div>
+                </div>
               </div>
-              <p className="mt-2">
-                For support, contact{' '}
-                <a href="mailto:helpdesk@civicconnect.gov" className="text-blue-600 hover:text-blue-800">
-                  helpdesk@civicconnect.gov
-                </a>
+            )}
+
+            {/* Success Message */}
+            {submitMessage && (
+              <div className="rounded-md bg-green-50 p-4">
+                <div className="flex">
+                  <CheckCircle className="h-5 w-5 text-green-400" />
+                  <div className="ml-3">
+                    <p className="text-sm font-medium text-green-800">
+                      {submitMessage}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Submit Button */}
+            <div>
+              <button
+                type="submit"
+                disabled={isSubmitting || isLoading}
+                className={`group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white ${
+                  isSubmitting || isLoading
+                    ? 'bg-gray-400 cursor-not-allowed'
+                    : 'bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500'
+                }`}
+              >
+                {isSubmitting || isLoading ? (
+                  <div className="flex items-center">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
+                    Signing in...
+                  </div>
+                ) : (
+                  'Sign in'
+                )}
+              </button>
+            </div>
+
+            {/* Sign up link */}
+            <div className="text-center">
+              <p className="text-sm text-gray-600">
+                Don't have an account?{' '}
+                <Link
+                  to="/signup"
+                  className="font-medium text-blue-600 hover:text-blue-500"
+                >
+                  Sign up here
+                </Link>
               </p>
             </div>
+          </form>
+        </div>
+      </div>
+
+      {/* Demo credentials helper */}
+      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
+        <div className="bg-gray-50 py-4 px-4 sm:rounded-lg sm:px-6">
+          <h3 className="text-sm font-medium text-gray-900 mb-2">Demo Credentials</h3>
+          <div className="text-xs text-gray-600 space-y-1">
+            <p><strong>Admin:</strong> admin@civic.com / password123</p>
+            <p><strong>Staff:</strong> staff@civic.com / password123</p>
+            <p><strong>Supervisor:</strong> supervisor@civic.com / password123</p>
           </div>
         </div>
       </div>
