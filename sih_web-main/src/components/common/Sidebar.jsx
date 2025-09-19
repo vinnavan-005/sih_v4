@@ -58,7 +58,7 @@ const Sidebar = () => {
 
     const baseItems = [];
 
-    if (currentUser.role === 'Admin') {
+    if (currentUser.role === 'admin') {
       baseItems.push(
         { 
           path: '/admin-dashboard', 
@@ -109,7 +109,7 @@ const Sidebar = () => {
         { path: '/files', icon: Upload, label: 'File Management' },
         { path: '/settings', icon: Settings, label: 'System Settings', badge: 'admin' }
       );
-    } else if (currentUser.role === 'DepartmentStaff') {
+    } else if (currentUser.role === 'staff') {
       baseItems.push(
         { 
           path: '/staff-dashboard', 
@@ -145,7 +145,7 @@ const Sidebar = () => {
         { path: '/updates', icon: Bell, label: 'Issue Updates' },
         { path: '/analytics', icon: BarChart3, label: 'Department Analytics' }
       );
-    } else if (currentUser.role === 'FieldSupervisor') {
+    } else if (currentUser.role === 'supervisor') {
       baseItems.push(
         { 
           path: '/supervisor-dashboard', 

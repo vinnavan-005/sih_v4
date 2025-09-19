@@ -5,21 +5,6 @@ const AuthContext = createContext();
 // API base URL - adjust this to match your backend
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-// Role mapping between frontend (UI) and backend (API)
-const FRONTEND_TO_BACKEND_ROLES = {
-  'Admin': 'admin',
-  'DepartmentStaff': 'staff',
-  'FieldSupervisor': 'supervisor',
-  'Citizen': 'citizen'
-};
-
-const BACKEND_TO_FRONTEND_ROLES = {
-  'admin': 'Admin',
-  'staff': 'DepartmentStaff',
-  'supervisor': 'FieldSupervisor',
-  'citizen': 'Citizen'
-};
-
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
@@ -33,7 +18,7 @@ export const AuthProvider = ({ children }) => {
   const [isLoading, setIsLoading] = useState(true);
   const [token, setToken] = useState(localStorage.getItem('token'));
 
-  // Helper function to process user data from backend
+  // Helper function to process user data from backend (NO ROLE CONVERSION)
   const processUserData = (userData) => {
     if (!userData) return null;
 
@@ -41,18 +26,12 @@ export const AuthProvider = ({ children }) => {
       id: userData.id,
       fullname: userData.full_name || userData.fullname,
       email: userData.email,
-      role: BACKEND_TO_FRONTEND_ROLES[userData.role] || userData.role, // Convert backend role to frontend
-      backendRole: userData.role, // Keep original for API calls
+      role: userData.role, // Keep original backend role (lowercase)
       department: userData.department,
       phone: userData.phone,
       created_at: userData.created_at,
       loginTime: userData.loginTime || new Date().toISOString()
     };
-  };
-
-  // Helper function to get backend role for API calls
-  const getBackendRole = (frontendRole) => {
-    return FRONTEND_TO_BACKEND_ROLES[frontendRole] || frontendRole;
   };
 
   // Initialize auth state
@@ -87,7 +66,7 @@ export const AuthProvider = ({ children }) => {
               setToken(null);
             }
           } else {
-            // Token verification failed
+            // Token verification failed, clear storage
             localStorage.removeItem('token');
             localStorage.removeItem('currentUser');
             setCurrentUser(null);
@@ -95,146 +74,113 @@ export const AuthProvider = ({ children }) => {
           }
         } catch (error) {
           console.error('Token verification failed:', error);
+          // Clear invalid data
           localStorage.removeItem('token');
           localStorage.removeItem('currentUser');
           setCurrentUser(null);
           setToken(null);
         }
       }
+      
       setIsLoading(false);
     };
 
     initializeAuth();
   }, []);
 
-  const login = async (email, password, role) => {
+  // Login function
+  const login = async (email, password) => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
-      
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          email: email.toLowerCase().trim(),
-          password: password
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password })
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Process user data and handle role conversion
         const processedUser = processUserData(data.user);
         
-        // Optional: Check if user's role matches selected role (if role selection is required)
-        if (role && processedUser.role !== role) {
-          return { 
-            success: false, 
-            error: `User role mismatch. Expected ${role}, but user is ${processedUser.role}` 
-          };
-        }
-
-        // Store token and user info
+        // Store token and user data
         localStorage.setItem('token', data.access_token);
         localStorage.setItem('currentUser', JSON.stringify(processedUser));
-
-        setCurrentUser(processedUser);
+        
         setToken(data.access_token);
+        setCurrentUser(processedUser);
         
         return { success: true, user: processedUser };
       } else {
-        return { 
-          success: false, 
-          error: data.detail || data.message || 'Login failed' 
-        };
+        throw new Error(data.message || 'Login failed');
       }
     } catch (error) {
       console.error('Login error:', error);
-      return { 
-        success: false, 
-        error: 'Network error. Please check your connection.' 
-      };
+      return { success: false, message: error.message || 'Login failed' };
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Signup function
   const signup = async (userData) => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
-      
       const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          ...userData,
-          email: userData.email.toLowerCase().trim()
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(userData)
       });
 
       const data = await response.json();
 
       if (response.ok && data.success) {
-        // Process user data
         const processedUser = processUserData(data.user);
-
-        // Store token and user info
+        
+        // Store token and user data
         localStorage.setItem('token', data.access_token);
         localStorage.setItem('currentUser', JSON.stringify(processedUser));
-
-        setCurrentUser(processedUser);
+        
         setToken(data.access_token);
+        setCurrentUser(processedUser);
         
         return { success: true, user: processedUser };
       } else {
-        return { 
-          success: false, 
-          error: data.detail || data.message || 'Signup failed' 
-        };
+        throw new Error(data.message || 'Signup failed');
       }
     } catch (error) {
       console.error('Signup error:', error);
-      return { 
-        success: false, 
-        error: 'Network error. Please check your connection.' 
-      };
+      return { success: false, message: error.message || 'Signup failed' };
     } finally {
       setIsLoading(false);
     }
   };
 
+  // Logout function
   const logout = async () => {
     try {
+      // Call backend logout if token exists
       if (token) {
-        // Call logout endpoint to invalidate token on server
         await fetch(`${API_BASE_URL}/api/auth/logout`, {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
+          headers: { 'Authorization': `Bearer ${token}` }
         });
       }
     } catch (error) {
       console.error('Logout error:', error);
-      // Continue with logout even if server call fails
+      // Continue with local logout even if backend call fails
     } finally {
-      // Always clear local storage
+      // Clear local storage and state
       localStorage.removeItem('token');
       localStorage.removeItem('currentUser');
-      setCurrentUser(null);
       setToken(null);
+      setCurrentUser(null);
     }
   };
 
-  const updateProfile = async (profileData) => {
-    if (!currentUser || !token) {
-      return { success: false, error: 'Not authenticated' };
-    }
+  // Update profile function
+  const updateProfile = async (updates) => {
+    if (!currentUser || !token) return { success: false, message: 'Not authenticated' };
 
     try {
       const response = await fetch(`${API_BASE_URL}/api/users/${currentUser.id}`, {
@@ -243,36 +189,31 @@ export const AuthProvider = ({ children }) => {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify(profileData)
+        body: JSON.stringify(updates)
       });
 
-      const data = await response.json();
-
       if (response.ok) {
-        // Process and update user data
-        const processedUser = processUserData(data);
-        const updatedUser = { ...currentUser, ...processedUser };
+        const data = await response.json();
+        const updatedUser = processUserData(data.user || data);
         
-        localStorage.setItem('currentUser', JSON.stringify(updatedUser));
         setCurrentUser(updatedUser);
+        localStorage.setItem('currentUser', JSON.stringify(updatedUser));
         
         return { success: true, user: updatedUser };
       } else {
-        return { 
-          success: false, 
-          error: data.detail || data.message || 'Profile update failed' 
-        };
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Update failed');
       }
     } catch (error) {
       console.error('Profile update error:', error);
       return { 
         success: false, 
-        error: 'Network error. Please check your connection.' 
+        message: error.message || 'Failed to update profile. Please check your connection.' 
       };
     }
   };
 
-  // Role checking functions
+  // Role checking functions (using backend roles directly)
   const hasRole = (roles) => {
     if (!currentUser) return false;
     const roleArray = Array.isArray(roles) ? roles : [roles];
@@ -283,14 +224,14 @@ export const AuthProvider = ({ children }) => {
     if (!currentUser) return false;
     
     const permissions = {
-      'view-all-issues': ['Admin'],
-      'manage-users': ['Admin'],
-      'assign-tasks': ['Admin', 'DepartmentStaff'],
-      'escalate-issues': ['Admin', 'DepartmentStaff'],
-      'update-status': ['Admin', 'DepartmentStaff', 'FieldSupervisor'],
-      'view-analytics': ['Admin', 'DepartmentStaff', 'FieldSupervisor'],
-      'manage-assignments': ['Admin', 'DepartmentStaff', 'FieldSupervisor'],
-      'system-settings': ['Admin']
+      'view-all-issues': ['admin'],
+      'manage-users': ['admin'],
+      'assign-tasks': ['admin', 'staff'],
+      'escalate-issues': ['admin', 'staff'],
+      'update-status': ['admin', 'staff', 'supervisor'],
+      'view-analytics': ['admin', 'staff', 'supervisor'],
+      'manage-assignments': ['admin', 'staff', 'supervisor'],
+      'system-settings': ['admin']
     };
     
     return permissions[permission]?.includes(currentUser.role) || false;
@@ -299,11 +240,11 @@ export const AuthProvider = ({ children }) => {
   const canAccessIssue = (issue) => {
     if (!currentUser || !issue) return false;
     
-    if (currentUser.role === 'Admin') return true;
-    if (currentUser.role === 'DepartmentStaff') {
+    if (currentUser.role === 'admin') return true;
+    if (currentUser.role === 'staff') {
       return issue.department === currentUser.department;
     }
-    if (currentUser.role === 'FieldSupervisor') {
+    if (currentUser.role === 'supervisor') {
       return issue.assignedTo === currentUser.email || issue.assignedTo === currentUser.id;
     }
     
@@ -336,21 +277,6 @@ export const AuthProvider = ({ children }) => {
     return response;
   };
 
-  // Get current user's backend role for API calls
-  const getUserBackendRole = () => {
-    if (!currentUser) return null;
-    return getBackendRole(currentUser.role);
-  };
-
-  // Check if user can access a specific route based on backend role requirements
-  const canAccessRoute = (requiredBackendRoles = []) => {
-    if (!currentUser) return false;
-    if (requiredBackendRoles.length === 0) return true;
-    
-    const userBackendRole = getUserBackendRole();
-    return requiredBackendRoles.includes(userBackendRole);
-  };
-
   const value = {
     currentUser,
     token,
@@ -362,13 +288,7 @@ export const AuthProvider = ({ children }) => {
     hasRole,
     hasPermission,
     canAccessIssue,
-    canAccessRoute,
-    getUserBackendRole,
-    getBackendRole,
-    apiCall,
-    // Expose role mappings for debugging
-    FRONTEND_TO_BACKEND_ROLES,
-    BACKEND_TO_FRONTEND_ROLES
+    apiCall
   };
 
   return (

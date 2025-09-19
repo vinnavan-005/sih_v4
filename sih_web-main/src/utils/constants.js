@@ -1,91 +1,37 @@
-// Application constants updated for FastAPI backend
+// Application constants
 
-// API Configuration
-export const API_CONFIG = {
-  BASE_URL: import.meta.env.VITE_API_URL || 'http://192.168.1.103:8000',
-  TIMEOUT: 30000,
-  RETRY_ATTEMPTS: 3,
-};
-
-// User roles (matching backend schema)
-export const USER_ROLES = {
-  CITIZEN: 'citizen',
+// ===== STANDARDIZED ROLES (Backend Format) =====
+export const ROLES = {
+  ADMIN: 'admin',
   STAFF: 'staff', 
   SUPERVISOR: 'supervisor',
-  ADMIN: 'admin'
+  CITIZEN: 'citizen'
 };
 
-// Issue statuses (matching backend schema)
-export const ISSUE_STATUSES = {
-  PENDING: 'pending',
-  IN_PROGRESS: 'in_progress',
-  RESOLVED: 'resolved'
+// Role display names for UI
+export const ROLE_LABELS = {
+  admin: 'Administrator',
+  staff: 'Department Staff',
+  supervisor: 'Field Supervisor', 
+  citizen: 'Citizen'
 };
 
-// Issue priorities (matching backend schema)
-export const ISSUE_PRIORITIES = {
-  LOW: 'low',
-  MEDIUM: 'medium', 
-  HIGH: 'high'
-};
-
-// Issue categories (matching backend schema)
-export const ISSUE_CATEGORIES = {
-  ROADS: 'roads',
-  WASTE: 'waste',
-  WATER: 'water',
-  STREETLIGHT: 'streetlight',
-  OTHER: 'other'
-};
-
-// Assignment statuses
-export const ASSIGNMENT_STATUSES = {
-  ASSIGNED: 'assigned',
-  IN_PROGRESS: 'in_progress',
-  COMPLETED: 'completed'
-};
-
-// Departments
-export const DEPARTMENTS = {
-  PUBLIC_WORKS: 'Public Works',
-  WATER_MANAGEMENT: 'Water Management',
-  TRANSPORTATION: 'Transportation',
-  PARKS_RECREATION: 'Parks & Recreation',
-  PUBLIC_SAFETY: 'Public Safety',
-  ENVIRONMENTAL_SERVICES: 'Environmental Services',
-  URBAN_PLANNING: 'Urban Planning'
-};
-
-// SLA Configuration
-export const SLA_CONFIG = {
-  DEFAULT_HOURS: 72, // 3 days
-  HIGH_PRIORITY_HOURS: 48, // 2 days
-  MEDIUM_PRIORITY_HOURS: 72, // 3 days
-  LOW_PRIORITY_HOURS: 120, // 5 days
-  ESCALATION_THRESHOLD_DAYS: 7
-};
-
-// Application routes
+// ===== NAVIGATION ROUTES =====
 export const ROUTES = {
-  // Auth routes
   LOGIN: '/login',
   SIGNUP: '/signup',
-  
-  // Dashboard routes
   ADMIN_DASHBOARD: '/admin-dashboard',
   STAFF_DASHBOARD: '/staff-dashboard',
   SUPERVISOR_DASHBOARD: '/supervisor-dashboard',
-  
-  // Feature routes
   ISSUES: '/issues',
-  ISSUE_DETAILS: '/issue-details/:id',
+  ISSUE_DETAILS: '/issue-details',
   ANALYTICS: '/analytics',
   ESCALATION: '/escalation',
   SETTINGS: '/settings',
   TASK_ASSIGNMENT: '/task-assignment'
 };
 
-// API endpoints (FastAPI backend)
+// ===== API ENDPOINTS (FastAPI backend) =====
 export const API_ENDPOINTS = {
   AUTH: {
     LOGIN: '/api/auth/login',
@@ -145,213 +91,207 @@ export const API_ENDPOINTS = {
     CAMERA_CAPTURE: '/api/files/camera/capture',
     DELETE: '/api/files/delete/:path',
     LIST: '/api/files/list',
-    INFO: '/api/files/info',
-    VALIDATE: '/api/files/validate',
-    CAMERA_STATUS: '/api/files/camera/status'
+    INFO: '/api/files/info'
   },
-  DASHBOARD: {
-    OVERVIEW: '/api/dashboard/',
-    TRENDS: '/api/dashboard/trends',
-    DEPARTMENTS: '/api/dashboard/departments',
-    PERFORMANCE: '/api/dashboard/performance',
-    EXPORT: '/api/dashboard/export'
+  ANALYTICS: {
+    OVERVIEW: '/api/analytics/overview',
+    ISSUES: '/api/analytics/issues',
+    DEPARTMENTS: '/api/analytics/departments',
+    TRENDS: '/api/analytics/trends'
   }
 };
 
-// Storage keys
-export const STORAGE_KEYS = {
-  ACCESS_TOKEN: 'access_token',
-  REFRESH_TOKEN: 'refresh_token',
-  CURRENT_USER: 'currentUser',
-  ESCALATION_LOGS: 'escalationLogs',
-  THEME_PREFERENCE: 'themePreference',
-  LANGUAGE_PREFERENCE: 'languagePreference',
-  FILTERS: 'filters'
+// ===== ISSUE CONSTANTS =====
+export const ISSUE_STATUS = {
+  PENDING: 'pending',
+  IN_PROGRESS: 'in_progress',
+  RESOLVED: 'resolved',
+  CLOSED: 'closed'
 };
 
-// UI Configuration
-export const UI_CONFIG = {
-  ITEMS_PER_PAGE: 20,
-  MAX_UPLOAD_SIZE_MB: 10,
-  SUPPORTED_IMAGE_FORMATS: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
-  DEBOUNCE_DELAY_MS: 300,
-  AUTO_SAVE_DELAY_MS: 1000,
-  SESSION_TIMEOUT_MINUTES: 60,
-  MAX_LOGIN_ATTEMPTS: 5,
-  LOCKOUT_DURATION_MINUTES: 15,
-  PAGINATION_SIZES: [10, 20, 50, 100]
+export const ISSUE_PRIORITY = {
+  LOW: 'low',
+  MEDIUM: 'medium',
+  HIGH: 'high',
+  CRITICAL: 'critical'
 };
 
-// Chart colors
-export const CHART_COLORS = {
-  PRIMARY: '#3B82F6',
-  SUCCESS: '#10B981',
-  WARNING: '#F59E0B',
-  ERROR: '#EF4444',
-  INFO: '#06B6D4',
-  PURPLE: '#8B5CF6',
-  PINK: '#EC4899',
-  INDIGO: '#6366F1'
+export const ISSUE_CATEGORIES = [
+  'Infrastructure',
+  'Transportation',
+  'Environment',
+  'Public Safety',
+  'Health',
+  'Education',
+  'Utilities',
+  'Other'
+];
+
+// ===== PERMISSION CONSTANTS =====
+export const PERMISSIONS = {
+  // Admin permissions
+  MANAGE_USERS: 'manage-users',
+  SYSTEM_SETTINGS: 'system-settings',
+  VIEW_ALL_ISSUES: 'view-all-issues',
+  
+  // Staff permissions  
+  ASSIGN_TASKS: 'assign-tasks',
+  ESCALATE_ISSUES: 'escalate-issues',
+  VIEW_DEPARTMENT_ISSUES: 'view-department-issues',
+  
+  // Supervisor permissions
+  UPDATE_STATUS: 'update-status',
+  MANAGE_ASSIGNMENTS: 'manage-assignments',
+  
+  // Common permissions
+  VIEW_ANALYTICS: 'view-analytics'
 };
 
-// Status colors for UI (matching backend statuses)
-export const STATUS_COLORS = {
-  [ISSUE_STATUSES.PENDING]: 'bg-red-100 text-red-800',
-  [ISSUE_STATUSES.IN_PROGRESS]: 'bg-yellow-100 text-yellow-800',
-  [ISSUE_STATUSES.RESOLVED]: 'bg-green-100 text-green-800',
-  // Assignment statuses
-  [ASSIGNMENT_STATUSES.ASSIGNED]: 'bg-blue-100 text-blue-800',
-  [ASSIGNMENT_STATUSES.IN_PROGRESS]: 'bg-yellow-100 text-yellow-800',
-  [ASSIGNMENT_STATUSES.COMPLETED]: 'bg-green-100 text-green-800'
-};
-
-// Priority colors for UI
-export const PRIORITY_COLORS = {
-  [ISSUE_PRIORITIES.LOW]: 'text-green-600',
-  [ISSUE_PRIORITIES.MEDIUM]: 'text-yellow-600',
-  [ISSUE_PRIORITIES.HIGH]: 'text-red-600'
-};
-
-// Validation rules
-export const VALIDATION_RULES = {
-  EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
-  PASSWORD_MIN_LENGTH: 6,
-  NAME_MIN_LENGTH: 2,
-  NAME_MAX_LENGTH: 100,
-  DESCRIPTION_MAX_LENGTH: 2000,
-  TITLE_MAX_LENGTH: 200,
-  PHONE_MIN_LENGTH: 10,
-  PHONE_MAX_LENGTH: 15
-};
-
-// Error messages
-export const ERROR_MESSAGES = {
-  REQUIRED_FIELD: 'This field is required',
-  INVALID_EMAIL: 'Please enter a valid email address',
-  PASSWORD_TOO_SHORT: `Password must be at least ${VALIDATION_RULES.PASSWORD_MIN_LENGTH} characters`,
-  NAME_TOO_SHORT: `Name must be at least ${VALIDATION_RULES.NAME_MIN_LENGTH} characters`,
-  NAME_TOO_LONG: `Name must not exceed ${VALIDATION_RULES.NAME_MAX_LENGTH} characters`,
-  EMAIL_EXISTS: 'This email is already registered',
-  INVALID_CREDENTIALS: 'Invalid email or password',
-  ACCOUNT_LOCKED: 'Account temporarily locked due to multiple failed attempts',
-  UNAUTHORIZED: 'You are not authorized to perform this action',
-  FILE_TOO_LARGE: `File size must not exceed ${UI_CONFIG.MAX_UPLOAD_SIZE_MB}MB`,
-  UNSUPPORTED_FILE_TYPE: 'Unsupported file type',
-  NETWORK_ERROR: 'Network error. Please check your connection.',
-  SERVER_ERROR: 'Server error. Please try again later.',
-  PHONE_INVALID: 'Please enter a valid phone number'
-};
-
-// Success messages
-export const SUCCESS_MESSAGES = {
-  LOGIN_SUCCESS: 'Login successful!',
-  SIGNUP_SUCCESS: 'Account created successfully!',
-  PROFILE_UPDATED: 'Profile updated successfully!',
-  PASSWORD_CHANGED: 'Password changed successfully!',
-  ISSUE_CREATED: 'Issue created successfully!',
-  ISSUE_UPDATED: 'Issue updated successfully!',
-  ISSUE_DELETED: 'Issue deleted successfully!',
-  ASSIGNMENT_CREATED: 'Assignment created successfully!',
-  ASSIGNMENT_UPDATED: 'Assignment updated successfully!',
-  UPDATE_ADDED: 'Update added successfully!',
-  FILE_UPLOADED: 'File uploaded successfully!',
-  VOTE_RECORDED: 'Vote recorded successfully!',
-  SETTINGS_SAVED: 'Settings saved successfully!'
-};
-
-// Default coordinates (Chennai, India - matching your backend)
-export const DEFAULT_COORDINATES = {
-  lat: 13.0827,
-  lng: 80.2707
-};
-
-// Map configuration
-export const MAP_CONFIG = {
-  DEFAULT_ZOOM: 12,
-  MARKER_ZOOM: 15,
-  CLUSTER_ZOOM: 10,
-  MAX_ZOOM: 18,
-  MIN_ZOOM: 8
-};
-
-// Date formats
-export const DATE_FORMATS = {
-  DISPLAY: 'MMM dd, yyyy',
-  INPUT: 'yyyy-MM-dd',
-  DATETIME_DISPLAY: 'MMM dd, yyyy hh:mm a',
-  TIME_DISPLAY: 'hh:mm a',
-  ISO: 'iso'
-};
-
-// Notification types
-export const NOTIFICATION_TYPES = {
-  INFO: 'info',
-  SUCCESS: 'success',
-  WARNING: 'warning',
-  ERROR: 'error'
-};
-
-// File upload configuration
-export const FILE_CONFIG = {
-  MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
-  ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
-  ALLOWED_DOCUMENT_TYPES: ['application/pdf', 'text/plain', 'application/msword'],
-  MAX_FILES_PER_REQUEST: 5
-};
-
-// Permissions based on roles
+// ===== ROLE-BASED ACCESS CONTROL =====
 export const ROLE_PERMISSIONS = {
-  [USER_ROLES.CITIZEN]: [
-    'create_issue',
-    'view_own_issues',
-    'vote_on_issues',
-    'view_public_issues'
+  admin: [
+    PERMISSIONS.MANAGE_USERS,
+    PERMISSIONS.SYSTEM_SETTINGS,
+    PERMISSIONS.VIEW_ALL_ISSUES,
+    PERMISSIONS.ASSIGN_TASKS,
+    PERMISSIONS.ESCALATE_ISSUES,
+    PERMISSIONS.UPDATE_STATUS,
+    PERMISSIONS.MANAGE_ASSIGNMENTS,
+    PERMISSIONS.VIEW_ANALYTICS
   ],
-  [USER_ROLES.STAFF]: [
-    'view_assigned_issues',
-    'update_issue_status',
-    'create_issue_updates',
-    'view_department_issues'
+  staff: [
+    PERMISSIONS.ASSIGN_TASKS,
+    PERMISSIONS.ESCALATE_ISSUES,
+    PERMISSIONS.VIEW_DEPARTMENT_ISSUES,
+    PERMISSIONS.UPDATE_STATUS,
+    PERMISSIONS.MANAGE_ASSIGNMENTS,
+    PERMISSIONS.VIEW_ANALYTICS
   ],
-  [USER_ROLES.SUPERVISOR]: [
-    'assign_issues',
-    'view_department_stats',
-    'manage_staff_assignments',
-    'escalate_issues'
+  supervisor: [
+    PERMISSIONS.UPDATE_STATUS,
+    PERMISSIONS.MANAGE_ASSIGNMENTS,
+    PERMISSIONS.VIEW_ANALYTICS
   ],
-  [USER_ROLES.ADMIN]: [
-    'manage_users',
-    'view_all_issues',
-    'system_configuration',
-    'access_analytics',
-    'bulk_operations'
+  citizen: [
+    // Citizens have basic permissions handled by components
   ]
 };
 
-// Export default object with commonly used constants
-export default {
-  API_CONFIG,
-  USER_ROLES,
-  ISSUE_STATUSES,
-  ISSUE_PRIORITIES,
-  ISSUE_CATEGORIES,
-  ASSIGNMENT_STATUSES,
-  DEPARTMENTS,
-  SLA_CONFIG,
-  ROUTES,
-  API_ENDPOINTS,
-  STORAGE_KEYS,
-  UI_CONFIG,
-  CHART_COLORS,
-  STATUS_COLORS,
-  PRIORITY_COLORS,
-  VALIDATION_RULES,
-  ERROR_MESSAGES,
-  SUCCESS_MESSAGES,
-  DEFAULT_COORDINATES,
-  MAP_CONFIG,
-  DATE_FORMATS,
-  NOTIFICATION_TYPES,
-  FILE_CONFIG,
-  ROLE_PERMISSIONS
+// ===== ROUTE ACCESS CONTROL =====
+export const ROUTE_ACCESS = {
+  [ROUTES.ADMIN_DASHBOARD]: [ROLES.ADMIN],
+  [ROUTES.STAFF_DASHBOARD]: [ROLES.ADMIN, ROLES.STAFF],
+  [ROUTES.SUPERVISOR_DASHBOARD]: [ROLES.SUPERVISOR],
+  [ROUTES.ANALYTICS]: [ROLES.ADMIN, ROLES.STAFF, ROLES.SUPERVISOR],
+  [ROUTES.ESCALATION]: [ROLES.ADMIN, ROLES.STAFF],
+  [ROUTES.TASK_ASSIGNMENT]: [ROLES.ADMIN, ROLES.STAFF],
+  [ROUTES.SETTINGS]: [ROLES.ADMIN],
+  [ROUTES.ISSUES]: [ROLES.ADMIN, ROLES.STAFF, ROLES.SUPERVISOR, ROLES.CITIZEN],
+  [ROUTES.ISSUE_DETAILS]: [ROLES.ADMIN, ROLES.STAFF, ROLES.SUPERVISOR, ROLES.CITIZEN]
+};
+
+// ===== UI CONSTANTS =====
+export const PAGINATION_DEFAULTS = {
+  DEFAULT_PAGE_SIZE: 20,
+  MAX_PAGE_SIZE: 100,
+  FIRST_PAGE: 1
+};
+
+export const NOTIFICATION_TYPES = {
+  SUCCESS: 'success',
+  ERROR: 'error',
+  WARNING: 'warning',
+  INFO: 'info'
+};
+
+export const FILE_UPLOAD = {
+  MAX_SIZE: 10 * 1024 * 1024, // 10MB
+  ALLOWED_IMAGE_TYPES: ['image/jpeg', 'image/png', 'image/webp', 'image/gif'],
+  ALLOWED_DOCUMENT_TYPES: ['application/pdf', 'text/plain']
+};
+
+// ===== HELPER FUNCTIONS =====
+export const getRoleName = (role) => ROLE_LABELS[role] || role;
+
+export const hasPermission = (userRole, permission) => {
+  return ROLE_PERMISSIONS[userRole]?.includes(permission) || false;
+};
+
+export const canAccessRoute = (userRole, route) => {
+  return ROUTE_ACCESS[route]?.includes(userRole) || false;
+};
+
+export const getDashboardRoute = (role) => {
+  switch (role) {
+    case ROLES.ADMIN:
+      return ROUTES.ADMIN_DASHBOARD;
+    case ROLES.STAFF:
+      return ROUTES.STAFF_DASHBOARD;
+    case ROLES.SUPERVISOR:
+      return ROUTES.SUPERVISOR_DASHBOARD;
+    default:
+      return ROUTES.LOGIN;
+  }
+};
+
+// ===== ERROR MESSAGES =====
+export const ERROR_MESSAGES = {
+  NETWORK_ERROR: 'Network error. Please check your connection and try again.',
+  UNAUTHORIZED: 'You are not authorized to perform this action.',
+  FORBIDDEN: 'Access denied. You do not have permission to access this resource.',
+  NOT_FOUND: 'The requested resource was not found.',
+  BAD_REQUEST: 'Invalid request. Please check your input and try again.',
+  SERVER_ERROR: 'Server error. Please try again later.',
+  TIMEOUT_ERROR: 'Request timeout. Please try again.',
+  TOKEN_EXPIRED: 'Your session has expired. Please log in again.',
+  VALIDATION_ERROR: 'Please check your input and try again.',
+  FILE_TOO_LARGE: 'File size exceeds the maximum allowed limit.',
+  INVALID_FILE_TYPE: 'Invalid file type. Please select a supported file format.',
+  UPLOAD_FAILED: 'File upload failed. Please try again.',
+  DELETE_FAILED: 'Failed to delete item. Please try again.',
+  UPDATE_FAILED: 'Failed to update item. Please try again.',
+  CREATE_FAILED: 'Failed to create item. Please try again.',
+  FETCH_FAILED: 'Failed to fetch data. Please try again.',
+  CONNECTION_ERROR: 'Connection error. Please check your internet connection.',
+  PERMISSION_DENIED: 'Permission denied. Contact your administrator for access.',
+  RATE_LIMIT_EXCEEDED: 'Too many requests. Please wait and try again.',
+  MAINTENANCE_MODE: 'System is under maintenance. Please try again later.',
+  GENERIC_ERROR: 'Something went wrong. Please try again.'
+};
+
+// ===== SUCCESS MESSAGES =====
+export const SUCCESS_MESSAGES = {
+  LOGIN_SUCCESS: 'Successfully logged in!',
+  LOGOUT_SUCCESS: 'Successfully logged out!',
+  SIGNUP_SUCCESS: 'Account created successfully!',
+  PROFILE_UPDATED: 'Profile updated successfully!',
+  ISSUE_CREATED: 'Issue reported successfully!',
+  ISSUE_UPDATED: 'Issue updated successfully!',
+  ISSUE_DELETED: 'Issue deleted successfully!',
+  ASSIGNMENT_CREATED: 'Task assigned successfully!',
+  ASSIGNMENT_UPDATED: 'Assignment updated successfully!',
+  FILE_UPLOADED: 'File uploaded successfully!',
+  SETTINGS_SAVED: 'Settings saved successfully!',
+  PASSWORD_CHANGED: 'Password changed successfully!',
+  EMAIL_VERIFIED: 'Email verified successfully!',
+  GENERIC_SUCCESS: 'Operation completed successfully!'
+};
+
+// ===== HTTP STATUS CODES =====
+export const HTTP_STATUS = {
+  OK: 200,
+  CREATED: 201,
+  NO_CONTENT: 204,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  FORBIDDEN: 403,
+  NOT_FOUND: 404,
+  METHOD_NOT_ALLOWED: 405,
+  CONFLICT: 409,
+  UNPROCESSABLE_ENTITY: 422,
+  TOO_MANY_REQUESTS: 429,
+  INTERNAL_SERVER_ERROR: 500,
+  BAD_GATEWAY: 502,
+  SERVICE_UNAVAILABLE: 503,
+  GATEWAY_TIMEOUT: 504
 };

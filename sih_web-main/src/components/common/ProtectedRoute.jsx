@@ -3,6 +3,7 @@ import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from "../../context/AuthContext";
 import { PageLoader, ErrorState } from './LoadingSpinner';
 import { AlertTriangle, Shield, UserX } from 'lucide-react';
+import { ROLES, getRoleName, getDashboardRoute } from '../../utils/constants';
 
 const ProtectedRoute = ({ 
   children, 
@@ -71,7 +72,7 @@ const ProtectedRoute = ({
         return <UnauthorizedAccess userRole={currentUser.role} requiredRoles={allowedRoles} />;
       } else {
         // Redirect to appropriate dashboard based on user role
-        const redirectPath = getDashboardPath(currentUser.role);
+        const redirectPath = getDashboardRoute(currentUser.role);
         return <Navigate to={redirectPath} replace />;
       }
     }
@@ -91,7 +92,7 @@ const UnauthorizedAccess = ({ userRole, requiredRoles }) => {
   };
 
   const goToDashboard = () => {
-    const dashboardPath = getDashboardPath(userRole);
+    const dashboardPath = getDashboardRoute(userRole);
     window.location.href = dashboardPath;
   };
 
@@ -111,10 +112,10 @@ const UnauthorizedAccess = ({ userRole, requiredRoles }) => {
             <AlertTriangle className="h-5 w-5 text-yellow-600 mr-2" />
             <div className="text-left">
               <p className="text-sm text-yellow-800">
-                <strong>Your role:</strong> {userRole}
+                <strong>Your role:</strong> {getRoleName(userRole)}
               </p>
               <p className="text-sm text-yellow-800">
-                <strong>Required roles:</strong> {requiredRoles.join(', ')}
+                <strong>Required roles:</strong> {requiredRoles.map(role => getRoleName(role)).join(', ')}
               </p>
             </div>
           </div>
@@ -145,41 +146,27 @@ const UnauthorizedAccess = ({ userRole, requiredRoles }) => {
   );
 };
 
-// Helper function to get dashboard path based on role
-const getDashboardPath = (role) => {
-  switch (role) {
-    case 'Admin':
-      return '/admin-dashboard';
-    case 'DepartmentStaff':
-      return '/staff-dashboard';
-    case 'FieldSupervisor':
-      return '/supervisor-dashboard';
-    default:
-      return '/login';
-  }
-};
-
-// Higher-order component for role-specific routes
+// Higher-order component for role-specific routes using standardized roles
 export const AdminRoute = ({ children, ...props }) => (
-  <ProtectedRoute allowedRoles={['Admin']} {...props}>
+  <ProtectedRoute allowedRoles={[ROLES.ADMIN]} {...props}>
     {children}
   </ProtectedRoute>
 );
 
 export const StaffRoute = ({ children, ...props }) => (
-  <ProtectedRoute allowedRoles={['Admin', 'DepartmentStaff']} {...props}>
+  <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.STAFF]} {...props}>
     {children}
   </ProtectedRoute>
 );
 
 export const SupervisorRoute = ({ children, ...props }) => (
-  <ProtectedRoute allowedRoles={['FieldSupervisor']} {...props}>
+  <ProtectedRoute allowedRoles={[ROLES.SUPERVISOR]} {...props}>
     {children}
   </ProtectedRoute>
 );
 
 export const AllRolesRoute = ({ children, ...props }) => (
-  <ProtectedRoute allowedRoles={['Admin', 'DepartmentStaff', 'FieldSupervisor']} {...props}>
+  <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.STAFF, ROLES.SUPERVISOR, ROLES.CITIZEN]} {...props}>
     {children}
   </ProtectedRoute>
 );
@@ -201,7 +188,7 @@ export const PublicRoute = ({ children, redirectIfAuthenticated = false, redirec
 
   // Redirect authenticated users away from public pages (like login/signup)
   if (redirectIfAuthenticated && currentUser) {
-    const dashboardPath = getDashboardPath(currentUser.role);
+    const dashboardPath = getDashboardRoute(currentUser.role);
     return <Navigate to={dashboardPath} replace />;
   }
 
@@ -239,104 +226,12 @@ export const PermissionRoute = ({
   
   return (
     <ProtectedRoute {...props}>
-      {hasPermission && !hasPermission(permission) ? (
-        fallback || (
-          <UnauthorizedAccess 
-            userRole="Current User" 
-            requiredRoles={[`Permission: ${permission}`]} 
-          />
-        )
-      ) : (
+      {hasPermission && !hasPermission(permission) ? 
+        (fallback || <UnauthorizedAccess userRole="unknown" requiredRoles={[permission]} />) : 
         children
-      )}
+      }
     </ProtectedRoute>
   );
-};
-
-// Department-specific route protection
-export const DepartmentRoute = ({ 
-  children, 
-  departments = [], 
-  allowAllDepartments = false,
-  ...props 
-}) => {
-  const { currentUser } = useAuth();
-  
-  const validator = (user) => {
-    if (!user || !user.department) return false;
-    if (allowAllDepartments) return true;
-    return departments.length === 0 || departments.includes(user.department);
-  };
-
-  return (
-    <CustomProtectedRoute validator={validator} {...props}>
-      {children}
-    </CustomProtectedRoute>
-  );
-};
-
-// Route for features that require email verification
-export const VerifiedRoute = ({ children, ...props }) => {
-  const { currentUser } = useAuth();
-  
-  const validator = (user) => {
-    // Assuming your backend provides email verification status
-    return user && user.email_verified !== false;
-  };
-
-  const fallbackComponent = (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-      <div className="text-center max-w-md mx-auto">
-        <AlertTriangle className="h-16 w-16 text-yellow-500 mx-auto mb-6" />
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Email Verification Required</h2>
-        <p className="text-gray-600 mb-6">
-          Please verify your email address to access this feature.
-        </p>
-        <button
-          onClick={() => window.location.href = '/verify-email'}
-          className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors font-medium"
-        >
-          Verify Email
-        </button>
-      </div>
-    </div>
-  );
-
-  return (
-    <CustomProtectedRoute 
-      validator={validator} 
-      fallbackComponent={fallbackComponent}
-      {...props}
-    >
-      {children}
-    </CustomProtectedRoute>
-  );
-};
-
-// Maintenance mode route wrapper
-export const MaintenanceAwareRoute = ({ children, maintenanceMode = false }) => {
-  if (maintenanceMode) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4">
-        <div className="text-center max-w-md mx-auto">
-          <div className="mb-8">
-            <div className="mx-auto w-16 h-16 bg-yellow-500 rounded-xl flex items-center justify-center mb-4">
-              <AlertTriangle className="h-8 w-8 text-white" />
-            </div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2">Maintenance Mode</h2>
-            <p className="text-gray-600">
-              The system is currently undergoing maintenance. Please check back later.
-            </p>
-          </div>
-          <div className="text-sm text-gray-500">
-            <p>Expected completion: 30 minutes</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return children;
 };
 
 export default ProtectedRoute;

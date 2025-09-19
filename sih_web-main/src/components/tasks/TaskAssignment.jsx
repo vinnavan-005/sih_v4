@@ -13,11 +13,11 @@ import {
   Building,
   User
 } from 'lucide-react';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://192.168.1.103:8000/api';
+import { useAuth } from '../../context/AuthContext';
+import { ROLES, API_ENDPOINTS } from '../../utils/constants';
 
 const TaskAssignment = () => {
-  const [currentUser, setCurrentUser] = useState(null);
+  const { currentUser, apiCall } = useAuth();
   const [pendingIssues, setPendingIssues] = useState([]);
   const [availableStaff, setAvailableStaff] = useState([]);
   const [assignments, setAssignments] = useState([]);
@@ -34,274 +34,212 @@ const TaskAssignment = () => {
   const loadUserAndData = async () => {
     try {
       setLoading(true);
-      
-      // Get current user
-      const token = localStorage.getItem('token');
-      if (!token) {
-        throw new Error('No authentication token found');
-      }
+      setError(null);
 
-      const userResponse = await fetch(`${API_BASE_URL}/auth/me`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      if (!userResponse.ok) {
-        throw new Error('Failed to fetch user data');
-      }
-      
-      const userData = await userResponse.json();
-      setCurrentUser(userData);
-
-      // Check permissions
-      if (!['admin', 'supervisor'].includes(userData.role)) {
-        setError('Access denied! Admin or Supervisor role required.');
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 2000);
+      // Check permissions - FIXED: use standardized roles
+      if (!currentUser || ![ROLES.ADMIN, ROLES.STAFF].includes(currentUser.role)) {
+        setError('Access denied! Administrator or Staff role required.');
         return;
       }
 
-      // Load data
+      // Load all data concurrently
       await Promise.all([
-        loadPendingIssues(userData),
-        loadAvailableStaff(userData),
-        loadAssignments(userData),
-        loadWorkloadStats(userData),
-        loadRecentUpdates(userData)
+        loadPendingIssues(),
+        loadAvailableStaff(),
+        loadAssignments(),
+        loadWorkloadStats(),
+        loadRecentUpdates()
       ]);
 
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Failed to load task assignment data');
       console.error('Failed to load data:', err);
     } finally {
       setLoading(false);
     }
   };
 
-  const loadPendingIssues = async (user) => {
+  const loadPendingIssues = async () => {
     try {
-      const token = localStorage.getItem('token');
-      let url = `${API_BASE_URL}/issues?status=pending&per_page=50`;
+      let endpoint = `${API_ENDPOINTS.ISSUES.LIST}?status=pending&per_page=50`;
 
-      // Supervisors only see issues in their department
-      if (user.role === 'supervisor' && user.department) {
-        url += `&department=${encodeURIComponent(user.department)}`;
+      // Staff can only see issues in their department
+      if (currentUser.role === ROLES.STAFF && currentUser.department) {
+        endpoint += `&department=${encodeURIComponent(currentUser.department)}`;
       }
 
-      const response = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
+      const response = await apiCall(endpoint);
+      
       if (response.ok) {
         const data = await response.json();
-        setPendingIssues(data.issues || []);
+        setPendingIssues(data.issues || data.data || []);
+      } else {
+        throw new Error('Failed to fetch pending issues');
       }
     } catch (err) {
-      console.error('Failed to load pending issues:', err);
+      console.error('Error loading pending issues:', err);
+      setPendingIssues([]);
     }
   };
 
-  const loadAvailableStaff = async (user) => {
+  const loadAvailableStaff = async () => {
     try {
-      const token = localStorage.getItem('token');
-      let url = `${API_BASE_URL}/users/staff?available_only=true`;
+      let endpoint = API_ENDPOINTS.USERS.STAFF;
 
-      // Supervisors only see staff in their department
-      if (user.role === 'supervisor' && user.department) {
-        url += `&department=${encodeURIComponent(user.department)}`;
+      // Staff can only see staff in their department
+      if (currentUser.role === ROLES.STAFF && currentUser.department) {
+        endpoint += `?department=${encodeURIComponent(currentUser.department)}`;
       }
 
-      const response = await fetch(url, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
+      const response = await apiCall(endpoint);
+      
       if (response.ok) {
         const data = await response.json();
-        setAvailableStaff(data);
+        setAvailableStaff(data.users || data.data || []);
+      } else {
+        throw new Error('Failed to fetch available staff');
       }
     } catch (err) {
-      console.error('Failed to load available staff:', err);
+      console.error('Error loading available staff:', err);
+      setAvailableStaff([]);
     }
   };
 
-  const loadAssignments = async (user) => {
+  const loadAssignments = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/assignments?per_page=20`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      let endpoint = API_ENDPOINTS.ASSIGNMENTS.LIST;
 
+      // Staff can only see assignments for their department
+      if (currentUser.role === ROLES.STAFF && currentUser.department) {
+        endpoint += `?department=${encodeURIComponent(currentUser.department)}`;
+      }
+
+      const response = await apiCall(endpoint);
+      
       if (response.ok) {
         const data = await response.json();
-        setAssignments(data.assignments || []);
+        setAssignments(data.assignments || data.data || []);
+      } else {
+        throw new Error('Failed to fetch assignments');
       }
     } catch (err) {
-      console.error('Failed to load assignments:', err);
+      console.error('Error loading assignments:', err);
+      setAssignments([]);
     }
   };
 
-  const loadWorkloadStats = async (user) => {
+  const loadWorkloadStats = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/assignments/stats/workload`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-
+      const response = await apiCall(API_ENDPOINTS.ASSIGNMENTS.WORKLOAD);
+      
       if (response.ok) {
         const data = await response.json();
         setWorkloadStats(data);
       }
     } catch (err) {
-      console.error('Failed to load workload stats:', err);
+      console.error('Error loading workload stats:', err);
+      setWorkloadStats(null);
     }
   };
 
-  const loadRecentUpdates = async (user) => {
+  const loadRecentUpdates = async () => {
     try {
-      const token = localStorage.getItem('token');
-      const response = await fetch(`${API_BASE_URL}/updates/recent?limit=10`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const response = await apiCall(API_ENDPOINTS.UPDATES.RECENT);
+      
+      if (response.ok) {
+        const data = await response.json();
+        setRecentUpdates(data.updates || data.data || []);
+      }
+    } catch (err) {
+      console.error('Error loading recent updates:', err);
+      setRecentUpdates([]);
+    }
+  };
+
+  const handleAssignTask = async (issueId, staffId, notes = '') => {
+    try {
+      const assignmentData = {
+        issue_id: issueId,
+        staff_id: staffId,
+        notes: notes,
+        assigned_by: currentUser.id
+      };
+
+      const response = await apiCall(API_ENDPOINTS.ASSIGNMENTS.CREATE, {
+        method: 'POST',
+        body: JSON.stringify(assignmentData)
       });
 
       if (response.ok) {
-        const data = await response.json();
-        setRecentUpdates(data.updates || []);
+        setMessage('Task assigned successfully!');
+        await loadUserAndData(); // Reload data
+        setTimeout(() => setMessage(''), 3000);
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to assign task');
       }
     } catch (err) {
-      console.error('Failed to load recent updates:', err);
+      setError(err.message || 'Failed to assign task');
+      setTimeout(() => setError(null), 5000);
     }
   };
 
-  const handleAssignIssue = async (issueId, staffId) => {
-    if (!staffId) {
-      setMessage('Please select a staff member!');
-      setTimeout(() => setMessage(''), 3000);
-      return;
-    }
-
+  const handleBulkAssign = async (assignments) => {
     try {
-      const token = localStorage.getItem('token');
-      
-      const response = await fetch(`${API_BASE_URL}/assignments`, {
+      const response = await apiCall(API_ENDPOINTS.ASSIGNMENTS.BULK_ASSIGN, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          issue_id: parseInt(issueId),
-          staff_id: staffId,
-          notes: `Assigned via task assignment interface by ${currentUser?.full_name || currentUser?.email}`
-        })
+        body: JSON.stringify({ assignments })
       });
 
-      if (!response.ok) {
+      if (response.ok) {
+        setMessage('Bulk assignment completed successfully!');
+        await loadUserAndData();
+        setTimeout(() => setMessage(''), 3000);
+      } else {
         const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to assign issue');
+        throw new Error(errorData.message || 'Bulk assignment failed');
       }
-
-      setMessage('Issue assigned successfully!');
-      
-      // Reload data
-      await Promise.all([
-        loadPendingIssues(currentUser),
-        loadAssignments(currentUser),
-        loadWorkloadStats(currentUser)
-      ]);
-
     } catch (err) {
-      setMessage(`Error: ${err.message}`);
+      setError(err.message || 'Bulk assignment failed');
+      setTimeout(() => setError(null), 5000);
     }
-
-    setTimeout(() => setMessage(''), 5000);
   };
 
-  const handleBulkAssign = async (issueIds, staffId) => {
-    if (!staffId || issueIds.length === 0) {
-      setMessage('Please select issues and a staff member!');
-      setTimeout(() => setMessage(''), 3000);
-      return;
-    }
-
-    try {
-      const token = localStorage.getItem('token');
-      
-      const response = await fetch(`${API_BASE_URL}/assignments/bulk-assign`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          issue_ids: issueIds.map(id => parseInt(id)),
-          staff_id: staffId,
-          notes: `Bulk assigned via task assignment interface by ${currentUser?.full_name || currentUser?.email}`
-        })
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.detail || 'Failed to bulk assign issues');
-      }
-
-      const result = await response.json();
-      setMessage(`Bulk assignment completed: ${result.processed} successful, ${result.failed} failed`);
-      
-      // Reload data
-      await Promise.all([
-        loadPendingIssues(currentUser),
-        loadAssignments(currentUser),
-        loadWorkloadStats(currentUser)
-      ]);
-
-    } catch (err) {
-      setMessage(`Error: ${err.message}`);
-    }
-
-    setTimeout(() => setMessage(''), 5000);
-  };
-
-  const handleViewIssue = (issueId) => {
-    window.open(`/issues/${issueId}`, '_blank');
+  const formatDate = (dateString) => {
+    return new Date(dateString).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'assigned':
-        return 'bg-blue-100 text-blue-800';
-      case 'in_progress':
-        return 'bg-yellow-100 text-yellow-800';
-      case 'completed':
-        return 'bg-green-100 text-green-800';
-      case 'pending':
-        return 'bg-gray-100 text-gray-800';
-      default:
-        return 'bg-gray-100 text-gray-800';
-    }
-  };
-
-  const getCategoryColor = (category) => {
     const colors = {
-      'roads': 'bg-blue-100 text-blue-800',
-      'waste': 'bg-green-100 text-green-800',
-      'water': 'bg-cyan-100 text-cyan-800',
-      'streetlight': 'bg-yellow-100 text-yellow-800',
-      'other': 'bg-gray-100 text-gray-800'
+      pending: 'bg-yellow-100 text-yellow-800',
+      in_progress: 'bg-blue-100 text-blue-800',
+      completed: 'bg-green-100 text-green-800',
+      overdue: 'bg-red-100 text-red-800'
     };
-    return colors[category] || 'bg-gray-100 text-gray-800';
+    return colors[status] || 'bg-gray-100 text-gray-800';
   };
 
-  const getWorkloadColor = (activeAssignments, avgWorkload) => {
-    if (activeAssignments > avgWorkload * 1.5) return 'bg-red-500';
-    if (activeAssignments > avgWorkload) return 'bg-yellow-500';
-    return 'bg-green-500';
+  const getPriorityColor = (priority) => {
+    const colors = {
+      low: 'text-green-600',
+      medium: 'text-yellow-600',
+      high: 'text-orange-600',
+      critical: 'text-red-600'
+    };
+    return colors[priority] || 'text-gray-600';
   };
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+      <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <RefreshCw className="h-8 w-8 text-blue-500 animate-spin mx-auto mb-4" />
+          <RefreshCw className="h-8 w-8 animate-spin text-blue-600 mx-auto mb-4" />
           <p className="text-gray-600">Loading task assignment data...</p>
         </div>
       </div>
@@ -310,14 +248,14 @@ const TaskAssignment = () => {
 
   if (error) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center max-w-md">
           <AlertTriangle className="h-12 w-12 text-red-500 mx-auto mb-4" />
-          <p className="text-red-600 mb-4">Access Denied</p>
-          <p className="text-gray-600 mb-4">{error}</p>
+          <h2 className="text-xl font-semibold text-gray-900 mb-2">Access Error</h2>
+          <p className="text-red-600 mb-4">{error}</p>
           <button
-            onClick={() => window.location.href = '/dashboard'}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors"
+            onClick={() => window.location.href = '/'}
+            className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition-colors"
           >
             Go to Dashboard
           </button>
@@ -329,352 +267,253 @@ const TaskAssignment = () => {
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <div className="bg-white shadow-sm">
+      <div className="bg-white shadow">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-6">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">Task Assignment</h1>
-              <p className="text-gray-600">Manage issue assignments and team workload</p>
+            <div className="flex items-center">
+              <ClipboardList className="h-8 w-8 text-blue-600 mr-3" />
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900">Task Assignment</h1>
+                <p className="text-gray-600">Manage issue assignments and workload distribution</p>
+              </div>
             </div>
-            <button
-              onClick={loadUserAndData}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Refresh
-            </button>
+            <div className="flex items-center space-x-4">
+              <span className="text-sm text-gray-600">
+                Logged in as: <strong>{currentUser?.fullname}</strong> ({currentUser?.role})
+              </span>
+              <button
+                onClick={loadUserAndData}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+              >
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
       </div>
-      
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Success/Error Messages */}
-        {message && (
-          <div className={`mb-6 p-4 rounded-lg ${
-            message.includes('successfully') || message.includes('completed')
-              ? 'bg-green-100 text-green-800 border border-green-200'
-              : 'bg-red-100 text-red-800 border border-red-200'
-          }`}>
+
+      {/* Notifications */}
+      {message && (
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg">
             {message}
           </div>
-        )}
-
-        {/* Pending Issues */}
-        <section className="bg-white rounded-lg shadow-sm mb-8 overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-              <ClipboardList className="h-6 w-6 text-blue-500 mr-2" />
-              Unassigned Issues ({pendingIssues.length})
-              {currentUser?.role === 'supervisor' && currentUser?.department && (
-                <span className="ml-2 text-sm text-gray-600">
-                  - {currentUser.department} Department
-                </span>
-              )}
-            </h2>
-          </div>
-          
-          <div className="overflow-x-auto">
-            {pendingIssues.length === 0 ? (
-              <div className="text-center py-12">
-                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-                <p className="text-gray-600 text-lg">No unassigned issues</p>
-                <p className="text-sm text-gray-500 mt-2">All issues have been assigned to staff members</p>
-              </div>
-            ) : (
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Issue
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Category
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Created
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Upvotes
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Assign To
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {pendingIssues.map((issue) => (
-                    <tr key={issue.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            #{issue.id}
-                          </div>
-                          <div className="text-sm text-gray-500 max-w-xs truncate">
-                            {issue.title}
-                          </div>
-                          <div className="text-xs text-gray-400">
-                            by {issue.citizen_name || 'Anonymous'}
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getCategoryColor(issue.category)}`}>
-                          {issue.category}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(issue.status)}`}>
-                          {issue.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        <div className="flex items-center">
-                          <Clock className="h-4 w-4 text-gray-400 mr-1" />
-                          {new Date(issue.created_at).toLocaleDateString()}
-                        </div>
-                        {issue.days_open && (
-                          <div className="text-xs text-gray-400">
-                            {issue.days_open} days old
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        <div className="flex items-center">
-                          <TrendingUp className="h-4 w-4 text-blue-500 mr-1" />
-                          {issue.upvotes || 0}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
-                          <select
-                            id={`assignSelect-${issue.id}`}
-                            className="text-sm border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                          >
-                            <option value="">Select Staff</option>
-                            {availableStaff.map(staff => (
-                              <option key={staff.id} value={staff.id}>
-                                {staff.full_name} {staff.active_assignments && `(${staff.active_assignments})`}
-                              </option>
-                            ))}
-                          </select>
-                          <button
-                            onClick={() => {
-                              const select = document.getElementById(`assignSelect-${issue.id}`);
-                              handleAssignIssue(issue.id, select.value);
-                            }}
-                            className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors inline-flex items-center"
-                          >
-                            <UserPlus className="h-3 w-3 mr-1" />
-                            Assign
-                          </button>
-                          <button
-                            onClick={() => handleViewIssue(issue.id)}
-                            className="text-gray-600 hover:text-gray-900 inline-flex items-center text-xs"
-                          >
-                            <Eye className="h-3 w-3 mr-1" />
-                            View
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </section>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          {/* Team Workload */}
-          <section className="bg-white rounded-lg shadow-sm p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
-              <Users className="h-6 w-6 text-green-500 mr-2" />
-              Staff Workload
-              {workloadStats && (
-                <span className="ml-2 text-sm text-gray-600">
-                  (Avg: {workloadStats.avg_workload})
-                </span>
-              )}
-            </h2>
-            
-            {!workloadStats || workloadStats.workload_distribution?.length === 0 ? (
-              <div className="text-center py-8">
-                <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <p className="text-gray-600">No staff workload data available</p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {workloadStats.workload_distribution.map(staff => (
-                  <div key={staff.staff_id} className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{staff.name}</h3>
-                        <p className="text-sm text-gray-600">{staff.department || 'No department'}</p>
-                      </div>
-                      <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                        staff.active_assignments > workloadStats.avg_workload 
-                          ? 'bg-red-100 text-red-800' 
-                          : 'bg-green-100 text-green-800'
-                      }`}>
-                        {staff.active_assignments} active
-                      </span>
-                    </div>
-                    
-                    <div className="grid grid-cols-3 gap-3 mb-3">
-                      <div className="text-center">
-                        <div className="text-lg font-bold text-blue-600">{staff.total_assignments}</div>
-                        <div className="text-xs text-gray-600">Total</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-lg font-bold text-yellow-600">{staff.active_assignments}</div>
-                        <div className="text-xs text-gray-600">Active</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-lg font-bold text-green-600">{staff.completed_assignments}</div>
-                        <div className="text-xs text-gray-600">Completed</div>
-                      </div>
-                    </div>
-                    
-                    {/* Workload Bar */}
-                    <div className="w-full bg-gray-200 rounded-full h-2 mb-2">
-                      <div 
-                        className={`h-2 rounded-full transition-all duration-300 ${getWorkloadColor(staff.active_assignments, workloadStats.avg_workload)}`}
-                        style={{ width: `${Math.min((staff.active_assignments / (workloadStats.avg_workload * 2)) * 100, 100)}%` }}
-                      ></div>
-                    </div>
-                    <div className="flex justify-between text-xs text-gray-600">
-                      <span>Completion Rate: {staff.completion_rate}%</span>
-                      <span>Load: {staff.active_assignments}/{Math.ceil(workloadStats.avg_workload * 2)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </section>
-
-          {/* Recent Activity */}
-          <section className="bg-white rounded-lg shadow-sm p-6">
-            <h2 className="text-xl font-semibold text-gray-900 mb-6 flex items-center">
-              <Activity className="h-6 w-6 text-purple-500 mr-2" />
-              Recent Updates
-            </h2>
-            
-            <div className="space-y-3 max-h-96 overflow-y-auto">
-              {recentUpdates.length === 0 ? (
-                <div className="text-center py-8">
-                  <Activity className="h-10 w-10 text-gray-400 mx-auto mb-3" />
-                  <p className="text-gray-600">No recent updates</p>
-                </div>
-              ) : (
-                recentUpdates.map((update) => (
-                  <div key={update.id} className="border border-gray-200 rounded-lg p-3 hover:bg-gray-50 transition-colors">
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <p className="text-sm text-gray-900">{update.update_text}</p>
-                        <div className="flex items-center mt-2 text-xs text-gray-500">
-                          <Clock className="h-3 w-3 mr-1" />
-                          {new Date(update.created_at).toLocaleString()}
-                          <span className="mx-2">•</span>
-                          <User className="h-3 w-3 mr-1" />
-                          {update.staff_name || 'Unknown'}
-                          {update.issue_title && (
-                            <>
-                              <span className="mx-2">•</span>
-                              <span>Issue: {update.issue_title}</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </section>
         </div>
+      )}
 
-        {/* Recent Assignments */}
-        {assignments.length > 0 && (
-          <section className="bg-white rounded-lg shadow-sm mt-8 overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h2 className="text-xl font-semibold text-gray-900 flex items-center">
-                <ClipboardList className="h-6 w-6 text-indigo-500 mr-2" />
-                Recent Assignments
-              </h2>
+      {/* Main Content */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+          {/* Left Column - Pending Issues */}
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-xl shadow-sm">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <Clock className="h-5 w-5 mr-2" />
+                  Pending Issues ({pendingIssues.length})
+                </h2>
+              </div>
+              <div className="p-6">
+                {pendingIssues.length === 0 ? (
+                  <div className="text-center py-8">
+                    <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
+                    <p className="text-gray-600">No pending issues to assign!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {pendingIssues.map((issue) => (
+                      <div key={issue.id} className="border border-gray-200 rounded-lg p-4 hover:border-blue-300 transition-colors">
+                        <div className="flex justify-between items-start mb-2">
+                          <h3 className="font-medium text-gray-900 flex-1">
+                            {issue.title}
+                          </h3>
+                          <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(issue.priority)}`}>
+                            {issue.priority || 'medium'}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600 mb-3">{issue.description}</p>
+                        <div className="flex justify-between items-center text-sm text-gray-500">
+                          <div className="flex items-center space-x-4">
+                            <span className="flex items-center">
+                              <Building className="h-4 w-4 mr-1" />
+                              {issue.category || 'General'}
+                            </span>
+                            <span className="flex items-center">
+                              <User className="h-4 w-4 mr-1" />
+                              {issue.citizen_name || 'Anonymous'}
+                            </span>
+                          </div>
+                          <span>{formatDate(issue.created_at)}</span>
+                        </div>
+                        
+                        {/* Assignment Section */}
+                        <div className="mt-4 pt-4 border-t border-gray-100">
+                          <AssignmentForm
+                            issue={issue}
+                            availableStaff={availableStaff}
+                            onAssign={handleAssignTask}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-            
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Issue
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Assigned To
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Assigned At
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Assigned By
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {assignments.slice(0, 10).map((assignment) => (
-                    <tr key={assignment.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
+          </div>
+
+          {/* Right Column - Stats & Staff */}
+          <div className="space-y-6">
+            {/* Workload Stats */}
+            {workloadStats && (
+              <div className="bg-white rounded-xl shadow-sm">
+                <div className="px-6 py-4 border-b border-gray-200">
+                  <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                    <TrendingUp className="h-5 w-5 mr-2" />
+                    Workload Overview
+                  </h2>
+                </div>
+                <div className="p-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-blue-600">
+                        {workloadStats.total_assignments || 0}
+                      </div>
+                      <div className="text-sm text-gray-600">Total Assignments</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-green-600">
+                        {workloadStats.completed_assignments || 0}
+                      </div>
+                      <div className="text-sm text-gray-600">Completed</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Available Staff */}
+            <div className="bg-white rounded-xl shadow-sm">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <Users className="h-5 w-5 mr-2" />
+                  Available Staff ({availableStaff.length})
+                </h2>
+              </div>
+              <div className="p-6">
+                {availableStaff.length === 0 ? (
+                  <p className="text-gray-600 text-center py-4">No available staff</p>
+                ) : (
+                  <div className="space-y-3">
+                    {availableStaff.map((staff) => (
+                      <div key={staff.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                         <div>
-                          <div className="text-sm font-medium text-gray-900">
-                            #{assignment.issue_id}
-                          </div>
-                          <div className="text-sm text-gray-500">
-                            {assignment.issue_title}
-                          </div>
+                          <p className="font-medium text-gray-900">{staff.full_name || staff.fullname}</p>
+                          <p className="text-sm text-gray-600">{staff.department}</p>
                         </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          <User className="h-4 w-4 text-gray-400 mr-2" />
-                          <div>
-                            <div className="text-sm font-medium text-gray-900">
-                              {assignment.staff_name}
-                            </div>
-                            {assignment.staff_department && (
-                              <div className="text-xs text-gray-500">
-                                {assignment.staff_department}
-                              </div>
-                            )}
-                          </div>
+                        <div className="text-right">
+                          <p className="text-sm font-medium text-blue-600">
+                            {staff.current_assignments || 0} tasks
+                          </p>
                         </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getStatusColor(assignment.status)}`}>
-                          {assignment.status.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {new Date(assignment.assigned_at).toLocaleString()}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {assignment.assigned_by_name || 'System'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
-          </section>
-        )}
-      </main>
+
+            {/* Recent Updates */}
+            <div className="bg-white rounded-xl shadow-sm">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <Activity className="h-5 w-5 mr-2" />
+                  Recent Updates
+                </h2>
+              </div>
+              <div className="p-6">
+                {recentUpdates.length === 0 ? (
+                  <p className="text-gray-600 text-center py-4">No recent updates</p>
+                ) : (
+                  <div className="space-y-3">
+                    {recentUpdates.slice(0, 5).map((update) => (
+                      <div key={update.id} className="text-sm">
+                        <p className="font-medium text-gray-900">{update.update_text}</p>
+                        <p className="text-gray-600">{formatDate(update.created_at)}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
+  );
+};
+
+// Assignment Form Component
+const AssignmentForm = ({ issue, availableStaff, onAssign }) => {
+  const [selectedStaff, setSelectedStaff] = useState('');
+  const [notes, setNotes] = useState('');
+  const [isAssigning, setIsAssigning] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!selectedStaff) return;
+
+    setIsAssigning(true);
+    try {
+      await onAssign(issue.id, selectedStaff, notes);
+      setSelectedStaff('');
+      setNotes('');
+    } catch (err) {
+      console.error('Assignment failed:', err);
+    } finally {
+      setIsAssigning(false);
+    }
+  };
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-3">
+      <div className="flex space-x-2">
+        <select
+          value={selectedStaff}
+          onChange={(e) => setSelectedStaff(e.target.value)}
+          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          required
+        >
+          <option value="">Select staff member...</option>
+          {availableStaff.map((staff) => (
+            <option key={staff.id} value={staff.id}>
+              {staff.full_name || staff.fullname} ({staff.current_assignments || 0} tasks)
+            </option>
+          ))}
+        </select>
+        <button
+          type="submit"
+          disabled={!selectedStaff || isAssigning}
+          className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center text-sm"
+        >
+          {isAssigning ? (
+            <RefreshCw className="h-4 w-4 animate-spin" />
+          ) : (
+            <UserPlus className="h-4 w-4" />
+          )}
+        </button>
+      </div>
+      {selectedStaff && (
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Assignment notes (optional)..."
+          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          rows={2}
+        />
+      )}
+    </form>
   );
 };
 
