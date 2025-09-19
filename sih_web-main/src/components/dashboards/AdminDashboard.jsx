@@ -23,7 +23,8 @@ import {
   Filter,
   Search,
   Download,
-  X
+  X,
+  ArrowUpCircle // Added for Escalation icon
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
@@ -290,8 +291,8 @@ const AdminDashboard = () => {
       icon: Users,
       key: 'users',
       submenu: [
-        { title: 'All Users', path: '/users', icon: Users },
-        { title: 'Staff Members', path: '/users?role=staff', icon: Users },
+        { title: 'All Users', path: '/admin-dashboard', icon: Users, onClick: () => setActiveTab('users') },
+        { title: 'Staff Members', path: '/admin-dashboard', icon: Users, onClick: () => setActiveTab('users') },
         { title: 'Departments', path: '/departments', icon: Briefcase },
       ]
     },
@@ -300,6 +301,12 @@ const AdminDashboard = () => {
       icon: ClipboardList,
       key: 'assignments',
       path: '/task-assignment'
+    },
+    {
+      title: 'Escalation',
+      icon: ArrowUpCircle,
+      key: 'escalation',
+      path: '/escalation'
     },
     {
       title: 'Analytics',
@@ -454,6 +461,14 @@ const AdminSidebar = ({ items, collapsed, onCollapse, currentUser, onLogout, act
     }
   };
 
+  const handleSubmenuClick = (subitem) => {
+    if (subitem.onClick) {
+      subitem.onClick();
+    } else if (subitem.path) {
+      navigate(subitem.path);
+    }
+  };
+
   return (
     <div className={`fixed left-0 top-0 h-full bg-slate-800 text-white transition-all duration-300 z-40 ${
       collapsed ? 'w-16' : 'w-64'
@@ -527,14 +542,14 @@ const AdminSidebar = ({ items, collapsed, onCollapse, currentUser, onLogout, act
               {item.submenu && !collapsed && openSubmenu[item.key] && (
                 <div className="ml-6 mt-2 space-y-1">
                   {item.submenu.map((subitem, index) => (
-                    <Link
+                    <button
                       key={index}
-                      to={subitem.path}
-                      className="flex items-center px-3 py-2 text-sm text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+                      onClick={() => handleSubmenuClick(subitem)}
+                      className="w-full flex items-center px-3 py-2 text-sm text-slate-400 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
                     >
                       <subitem.icon className="h-4 w-4 mr-2" />
                       {subitem.title}
-                    </Link>
+                    </button>
                   ))}
                 </div>
               )}
@@ -777,17 +792,13 @@ const UsersTab = ({ users, onUserSelect, onShowModal, formatDate }) => (
   </div>
 );
 
-// Issues Tab Component (simplified)
+// Issues Tab Component (simplified) - Removed "Create Issue" button
 const IssuesTab = ({ recentIssues, dashboardData, formatDate, getStatusColor, getPriorityColor }) => (
   <div className="space-y-6">
     <div className="flex justify-between items-center">
       <h2 className="text-2xl font-semibold text-gray-900">Issues Management</h2>
       <div className="flex space-x-2">
-        <button className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center">
-          <Plus className="h-4 w-4 mr-2" />
-          Create Issue
-        </button>
-        <Link to="/issues" className="bg-gray-200 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-300 transition-colors">
+        <Link to="/issues" className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors">
           View All Issues
         </Link>
       </div>

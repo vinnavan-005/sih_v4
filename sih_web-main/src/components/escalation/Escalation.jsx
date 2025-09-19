@@ -16,12 +16,12 @@ import {
   RefreshCw,
   Send,
   MessageSquare,
+  BarChart3 // Fixed: Added missing import
 } from 'lucide-react';
-import apiService from '../../services/api';
-import { ROLES } from '../../utils/constants';
+import { ROLES, API_ENDPOINTS } from '../../utils/constants'; // Fixed: Use proper API endpoints
 
 const Escalation = () => {
-  const { currentUser } = useAuth();
+  const { currentUser, apiCall } = useAuth(); // Fixed: Use apiCall from context
   const [issues, setIssues] = useState([]);
   const [escalatedIssues, setEscalatedIssues] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -44,36 +44,38 @@ const Escalation = () => {
       setLoading(true);
       setError(null);
 
-      // Fetch issues that might need escalation
-      const issuesResponse = await apiService.issues.list({ 
-        status: 'open,in_progress',
-        per_page: 50 
-      });
-
-      const allIssues = issuesResponse?.issues || issuesResponse?.data || [];
+      // Fixed: Use proper API endpoint and apiCall method
+      const response = await apiCall(`${API_ENDPOINTS.ISSUES.LIST}?per_page=50`);
       
-      // Filter for issues that might need escalation
-      const needsEscalation = allIssues.filter(issue => {
-        const createdDate = new Date(issue.created_at);
-        const daysSinceCreated = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+      if (response && response.ok) {
+        const data = await response.json();
+        const allIssues = data.issues || data.data || [];
         
-        // Logic for escalation candidates:
-        // - Open for more than 7 days
-        // - High priority and open for more than 3 days
-        // - Critical priority and open for more than 1 day
-        return (
-          (daysSinceCreated > 7) ||
-          (issue.priority === 'high' && daysSinceCreated > 3) ||
-          (issue.priority === 'critical' && daysSinceCreated > 1) ||
-          (issue.status === 'escalated')
-        );
-      });
+        // Filter for issues that might need escalation
+        const needsEscalation = allIssues.filter(issue => {
+          const createdDate = new Date(issue.created_at);
+          const daysSinceCreated = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+          
+          // Logic for escalation candidates:
+          // - Open for more than 7 days
+          // - High priority and open for more than 3 days  
+          // - Critical priority and open for more than 1 day
+          return (
+            (daysSinceCreated > 7) ||
+            (issue.priority === 'high' && daysSinceCreated > 3) ||
+            (issue.priority === 'critical' && daysSinceCreated > 1) ||
+            (issue.status === 'escalated')
+          );
+        });
 
-      setIssues(needsEscalation);
+        setIssues(needsEscalation);
 
-      // Separate already escalated issues
-      const alreadyEscalated = needsEscalation.filter(issue => issue.status === 'escalated');
-      setEscalatedIssues(alreadyEscalated);
+        // Separate already escalated issues
+        const alreadyEscalated = needsEscalation.filter(issue => issue.status === 'escalated');
+        setEscalatedIssues(alreadyEscalated);
+      } else {
+        throw new Error('Failed to fetch issues');
+      }
 
     } catch (err) {
       console.error('Failed to fetch escalation data:', err);
@@ -97,19 +99,35 @@ const Escalation = () => {
     try {
       setActionLoading(selectedIssue.id);
 
+      // Fixed: Use proper API endpoints
       // Update issue status to escalated
-      await apiService.issues.update(selectedIssue.id, {
-        status: 'escalated',
-        priority: 'critical'
+      const updateResponse = await apiCall(`${API_ENDPOINTS.ISSUES.UPDATE.replace(':id', selectedIssue.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: 'escalated',
+          priority: 'critical'
+        })
       });
 
-      // Add an update explaining the escalation
-      await apiService.updates.create({
-        issue_id: selectedIssue.id,
-        update_text: `Issue escalated: ${escalationReason}`,
-        status: 'escalated',
-        added_by: currentUser.id
-      });
+      if (!updateResponse.ok) {
+        throw new Error('Failed to update issue status');
+      }
+
+      // Add an update explaining the escalation (if updates endpoint exists)
+      try {
+        await apiCall(`${API_ENDPOINTS.UPDATES.CREATE}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            issue_id: selectedIssue.id,
+            update_text: `Issue escalated: ${escalationReason}`,
+            status: 'escalated',
+            added_by: currentUser.id
+          })
+        });
+      } catch (updateErr) {
+        console.warn('Could not add escalation update:', updateErr);
+        // Continue even if update creation fails
+      }
 
       // Refresh data
       await fetchData();
@@ -134,17 +152,31 @@ const Escalation = () => {
       setActionLoading(issueId);
 
       // Update issue status back to in_progress
-      await apiService.issues.update(issueId, {
-        status: 'in_progress'
+      const response = await apiCall(`${API_ENDPOINTS.ISSUES.UPDATE.replace(':id', issueId)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          status: 'in_progress'
+        })
       });
 
-      // Add update
-      await apiService.updates.create({
-        issue_id: issueId,
-        update_text: 'Escalation resolved. Issue returned to normal workflow.',
-        status: 'info',
-        added_by: currentUser.id
-      });
+      if (!response.ok) {
+        throw new Error('Failed to resolve escalation');
+      }
+
+      // Add update (if possible)
+      try {
+        await apiCall(`${API_ENDPOINTS.UPDATES.CREATE}`, {
+          method: 'POST',
+          body: JSON.stringify({
+            issue_id: issueId,
+            update_text: 'Escalation resolved. Issue returned to normal workflow.',
+            status: 'info',
+            added_by: currentUser.id
+          })
+        });
+      } catch (updateErr) {
+        console.warn('Could not add resolution update:', updateErr);
+      }
 
       await fetchData();
       alert('Escalation resolved successfully!');
@@ -184,7 +216,7 @@ const Escalation = () => {
         return 'bg-red-100 text-red-800 border-red-200';
       case 'in_progress':
         return 'bg-blue-100 text-blue-800 border-blue-200';
-      case 'open':
+      case 'pending':
         return 'bg-yellow-100 text-yellow-800 border-yellow-200';
       default:
         return 'bg-gray-100 text-gray-800 border-gray-200';
@@ -275,7 +307,7 @@ const Escalation = () => {
             
             <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
               <div className="flex items-center">
-                <Priority className="h-5 w-5 text-blue-600 mr-2" />
+                <BarChart3 className="h-5 w-5 text-blue-600 mr-2" />
                 <div>
                   <p className="text-sm text-blue-600">High Priority</p>
                   <p className="text-xl font-bold text-blue-900">
@@ -424,7 +456,7 @@ const Escalation = () => {
                               className="inline-flex items-center px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
                             >
                               <CheckCircle className="h-3 w-3 mr-1" />
-                              Resolve
+                              {actionLoading === issue.id ? 'Resolving...' : 'Resolve'}
                             </button>
                           ) : (
                             <button
@@ -433,7 +465,7 @@ const Escalation = () => {
                               className="inline-flex items-center px-3 py-1 bg-red-600 text-white text-xs rounded-md hover:bg-red-700 transition-colors disabled:opacity-50"
                             >
                               <ArrowUp className="h-3 w-3 mr-1" />
-                              Escalate
+                              {actionLoading === issue.id ? 'Escalating...' : 'Escalate'}
                             </button>
                           )}
                         </div>
