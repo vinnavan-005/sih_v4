@@ -12,8 +12,10 @@ const Signup = () => {
     email: '',
     password: '',
     phone: '',
-    role: '' // Added role field
+    role: '', // Added role field
+    department: '' // Add this line
   });
+
   const [showPassword, setShowPassword] = useState(false);
   const [message, setMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -35,6 +37,15 @@ const Signup = () => {
       ...prev,
       [name]: value
     }));
+
+    // Clear department when role changes to Admin
+    if (name === 'role' && value === 'Admin') {
+      setFormData(prev => ({
+        ...prev,
+        [name]: value,
+        department: ''
+      }));
+    }
 
     // Check password strength
     if (name === 'password') {
@@ -88,9 +99,18 @@ const Signup = () => {
     setIsLoading(true);
     setMessage('');
 
-    // Validation
-    if (!formData.fullname.trim() || !formData.email.trim() || !formData.password || !formData.role) {
-      setMessage('Please fill in all required fields including role selection');
+    // Enhanced Validation
+    const requiredFields = ['fullname', 'email', 'password', 'role'];
+    
+    // Add department as required for staff and supervisor
+    if (formData.role === 'DepartmentStaff' || formData.role === 'FieldSupervisor') {
+      requiredFields.push('department');
+    }
+    
+    const missingFields = requiredFields.filter(field => !formData[field]?.trim());
+    
+    if (missingFields.length > 0) {
+      setMessage('Please fill in all required fields including role and department selection');
       setIsLoading(false);
       return;
     }
@@ -126,7 +146,22 @@ const Signup = () => {
     }
   };
 
-  const canSubmit = formData.fullname.trim() && formData.email.trim() && formData.password && formData.role && passwordStrength.score >= 3 && !isLoading;
+  // Updated canSubmit logic to include department validation
+  const canSubmit = () => {
+    const basicRequirements = formData.fullname.trim() && 
+                             formData.email.trim() && 
+                             formData.password && 
+                             formData.role && 
+                             passwordStrength.score >= 3 && 
+                             !isLoading;
+    
+    // Additional check for department requirement
+    if (formData.role === 'DepartmentStaff' || formData.role === 'FieldSupervisor') {
+      return basicRequirements && formData.department.trim();
+    }
+    
+    return basicRequirements;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -228,6 +263,45 @@ const Signup = () => {
                 </div>
               )}
             </div>
+            
+            {/* Department Selection - Only for Staff and Supervisor */}
+            {(formData.role === 'DepartmentStaff' || formData.role === 'FieldSupervisor') && (
+              <div>
+                <label htmlFor="department" className="block text-sm font-medium text-gray-700 mb-2">
+                  Select Department *
+                </label>
+                <select
+                  id="department"
+                  name="department"
+                  required
+                  value={formData.department}
+                  onChange={handleInputChange}
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-colors bg-white"
+                  disabled={isLoading}
+                >
+                  <option value="" disabled>Choose your department</option>
+                  <option value="Road Department">Road Department</option>
+                  <option value="Electricity Department">Electricity Department</option>
+                  <option value="Sanitary Department">Sanitary Department</option>
+                  <option value="Public Service">Public Service</option>
+                </select>
+                
+                {/* Department Description */}
+                {formData.department && (
+                  <div className="mt-2 p-3 bg-green-50 rounded-lg">
+                    <p className="text-sm text-green-700">
+                      <strong>{formData.department}</strong> - You'll see issues related to: {
+                      formData.department === 'Road Department' ? 'Roads & Infrastructure' :
+                      formData.department === 'Electricity Department' ? 'Street Lighting & Electrical' :
+                      formData.department === 'Sanitary Department' ? 'Waste Management & Water Issues' :
+                      formData.department === 'Public Service' ? 'All Categories' :
+                      'All Categories'
+                    }
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Password */}
             <div>
@@ -295,7 +369,7 @@ const Signup = () => {
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={!canSubmit}
+              disabled={!canSubmit()}
               className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg hover:bg-blue-700 focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold flex items-center justify-center"
             >
               {isLoading ? (

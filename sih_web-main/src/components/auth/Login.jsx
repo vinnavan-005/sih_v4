@@ -12,7 +12,8 @@ const Login = () => {
   const [formData, setFormData] = useState({
     email: '',
     password: '',
-    role: 'Admin' // Frontend display format
+    role: 'Admin', // Frontend display format
+    department: '' // Add this line
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -24,20 +25,29 @@ const Login = () => {
   const from = location.state?.from?.pathname || null;
 
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
+  const { name, value } = e.target;
+  setFormData(prev => ({
+    ...prev,
+    [name]: value
+  }));
+
+  // Clear department when role changes to Admin
+  if (name === 'role' && value === 'Admin') {
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: value,
+      department: ''
     }));
-    
-    // Clear field-specific error when user starts typing
-    if (errors[name]) {
-      setErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
-    }
-  };
+  }
+  
+  // Clear field-specific error when user starts typing
+  if (errors[name]) {
+    setErrors(prev => ({
+      ...prev,
+      [name]: ''
+    }));
+  }
+};
 
   const validateForm = () => {
     const newErrors = {};
@@ -61,10 +71,14 @@ const Login = () => {
       newErrors.role = 'Please select your role';
     }
 
+    // Department validation (only for staff and supervisor)
+    if ((formData.role === 'DepartmentStaff' || formData.role === 'FieldSupervisor') && !formData.department) {
+      newErrors.department = 'Please select your department';
+    }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
-
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -75,7 +89,7 @@ const Login = () => {
     setErrors({});
 
     try {
-      const result = await login(formData.email, formData.password, formData.role);
+      const result = await login(formData.email, formData.password, formData.role, formData.department);
       
       if (result.success) {
         setSubmitMessage('Login successful! Redirecting...');
@@ -123,7 +137,7 @@ const Login = () => {
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow-lg sm:rounded-lg sm:px-10">
           <form className="space-y-6" onSubmit={handleSubmit}>
-            {/* Role Selection - FIXED to match backend */}
+            {/* Role Selection */}
             <div>
               <label htmlFor="role" className="block text-sm font-medium text-gray-700">
                 Login as
@@ -153,6 +167,39 @@ const Login = () => {
               )}
             </div>
 
+            {/* Department Selection - Only for Staff and Supervisor */}
+            {(formData.role === 'DepartmentStaff' || formData.role === 'FieldSupervisor') && (
+              <div>
+                <label htmlFor="department" className="block text-sm font-medium text-gray-700">
+                  Department
+                </label>
+                <div className="mt-1 relative">
+                  <select
+                    id="department"
+                    name="department"
+                    value={formData.department || ''}
+                    onChange={handleInputChange}
+                    className={`appearance-none block w-full px-3 py-2 pl-10 border ${
+                      errors.department ? 'border-red-300' : 'border-gray-300'
+                    } rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500`}
+                    required
+                  >
+                    <option value="">Select your department</option>
+                    <option value="Road Department">Road Department</option>
+                    <option value="Electricity Department">Electricity Department</option>
+                    <option value="Sanitary Department">Sanitary Department</option>
+                    <option value="Public Service">Public Service</option>
+                  </select>
+                  <User className="h-5 w-5 text-gray-400 absolute left-3 top-2.5" />
+                </div>
+                {errors.department && (
+                  <p className="mt-1 text-sm text-red-600 flex items-center">
+                    <AlertCircle className="h-4 w-4 mr-1" />
+                    {errors.department}
+                  </p>
+                )}
+              </div>
+            )}
             {/* Email */}
             <div>
               <label htmlFor="email" className="block text-sm font-medium text-gray-700">

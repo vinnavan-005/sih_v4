@@ -165,7 +165,7 @@ class IssueBase(BaseModel):
     """Base issue model."""
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field(..., min_length=1, max_length=2000)
-    category: Literal["roads", "waste", "water", "streetlight", "other"]
+    category: Literal["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     image_url: Optional[str] = Field(None, max_length=500)
@@ -180,7 +180,7 @@ class IssueUpdate(BaseModel):
     """Schema for updating issues."""
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = Field(None, min_length=1, max_length=2000)
-    category: Optional[Literal["roads", "waste", "water", "streetlight", "other"]] = None
+    category: Literal["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"] = None
     status: Optional[Literal["pending", "in_progress", "resolved"]] = None
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
@@ -215,7 +215,7 @@ class IssueListResponse(BaseResponse):
 class IssueSearchRequest(BaseModel):
     """Issue search request."""
     query: Optional[str] = None
-    category: Optional[Literal["roads", "waste", "water", "streetlight", "other"]] = None
+    category: Literal["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"] = None
     status: Optional[Literal["pending", "in_progress", "resolved"]] = None
     citizen_id: Optional[str] = None
     department: Optional[str] = None

@@ -29,7 +29,7 @@ class IssuesService:
                     raise ValueError(f"Missing required field: {field}")
             
             # Validate category
-            valid_categories = ["roads", "waste", "water", "streetlight", "other"]
+            valid_categories = ["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
             if data["category"] not in valid_categories:
                 raise ValueError(f"Invalid category. Must be one of: {valid_categories}")
             
@@ -103,7 +103,7 @@ class IssuesService:
             
             # Validate data if provided
             if "category" in new_data:
-                valid_categories = ["roads", "waste", "water", "streetlight", "other"]
+                valid_categories = ["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
                 if new_data["category"] not in valid_categories:
                     raise ValueError(f"Invalid category. Must be one of: {valid_categories}")
             
@@ -354,7 +354,7 @@ class IssuesService:
             stats["resolved_issues"] = count_records("issues", {**filters, "status": "resolved"})
             
             # Issues by category
-            categories = ["roads", "waste", "water", "streetlight", "other"]
+            categories = ["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
             for category in categories:
                 count = count_records("issues", {**filters, "category": category})
                 stats["issues_by_category"][category] = count
@@ -678,7 +678,7 @@ class IssuesService:
     def get_category_insights(category: str, days: int = 30) -> Dict[str, Any]:
         """Get insights for a specific category of issues."""
         try:
-            valid_categories = ["roads", "waste", "water", "streetlight", "other"]
+            valid_categories = ["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
             if category not in valid_categories:
                 raise ValueError(f"Invalid category. Must be one of: {valid_categories}")
             
@@ -795,7 +795,7 @@ class IssuesService:
             # Basic statistics
             total_issues = len(issues)
             status_counts = {"pending": 0, "in_progress": 0, "resolved": 0}
-            category_counts = {"roads": 0, "waste": 0, "water": 0, "streetlight": 0, "other": 0}
+            category_counts = {"potholes": 0, "DamagedElectricalPoles": 0, "Garbage": 0, "WaterLogging": 0, "FallenTrees": 0}
             
             total_upvotes = 0
             issues_with_location = 0

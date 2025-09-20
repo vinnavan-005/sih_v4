@@ -42,6 +42,34 @@ export const getDashboardRoute = (role) => {
   }
 };
 
+
+
+// ===== DEPARTMENT-CATEGORY MAPPING (NEW) =====
+export const DEPARTMENT_CATEGORIES = {
+  'Road Department': ['potholes'],
+  'Electricity Department': ['DamagedElectricalPoles'],
+  'Sanitary Department': ['Garbage'],
+  'Public Service': ['WaterLogging', 'FallenTrees']
+};
+
+// Helper function to get allowed categories for a department
+export const getDepartmentCategories = (department) => {
+  if (!department) return [];
+  return DEPARTMENT_CATEGORIES[department] || [];
+};
+
+// Helper function to check if a department can access a category
+export const canDepartmentAccessCategory = (department, category) => {
+  if (!department || !category) return false;
+  const allowedCategories = getDepartmentCategories(department);
+  return allowedCategories.includes(category);
+};
+
+// Helper function to get all available departments
+export const getAvailableDepartments = () => {
+  return Object.keys(DEPARTMENT_CATEGORIES);
+};
+
 // ===== NAVIGATION ROUTES =====
 export const ROUTES = {
   LOGIN: '/login',

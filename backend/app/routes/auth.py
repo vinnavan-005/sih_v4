@@ -159,9 +159,9 @@ async def register(request: Request):
             if mapped_role in valid_roles:
                 assigned_role = mapped_role
                 
-                # Assign default department for staff and supervisor roles
+                # Get department from request body (web app) or assign default
                 if assigned_role in ["staff", "supervisor"]:
-                    assigned_department = "Public Works"  # Default department
+                    assigned_department = body.get("department") or "Public Works"  # Use provided department or default
         
         # Check if profile already exists (in case of retry)
         existing_profile = get_data("profiles", {"id": user_id})

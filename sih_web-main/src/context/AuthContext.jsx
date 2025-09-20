@@ -1,9 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { getDepartmentCategories, canDepartmentAccessCategory } from '../utils/constants';
+
 
 const AuthContext = createContext();
 
-// API base URL - adjust this to match your backend
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://192.168.1.103:8000';
+// API base URL - Updated with your IP
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://192.168.137.219:8000';
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
@@ -78,7 +80,7 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // Login function - FIXED to handle backend roles correctly
-  const login = async (email, password, selectedRole) => {
+  const login = async (email, password, selectedRole, selectedDepartment = '') => {
     try {
       setIsLoading(true);
       
@@ -109,12 +111,23 @@ export const AuthProvider = ({ children }) => {
         const expectedBackendRole = roleMapping[selectedRole];
         
         // Validate role match
-        if (userRole !== expectedBackendRole) {
-          return { 
-            success: false, 
-            error: `Role mismatch. You selected ${selectedRole}, but your account is registered as ${userRole}. Please select the correct role.` 
-          };
-        }
+        // Validate role match
+if (userRole !== expectedBackendRole) {
+  return { 
+    success: false, 
+    error: `Role mismatch. You selected ${selectedRole}, but your account is registered as ${userRole}. Please select the correct role.` 
+  };
+}
+
+    // Validate department match for staff and supervisor
+    if ((expectedBackendRole === 'staff' || expectedBackendRole === 'supervisor') && selectedDepartment) {
+      if (data.user.department !== selectedDepartment) {
+        return {
+          success: false,
+          error: `Department mismatch. You selected ${selectedDepartment}, but your account is registered under ${data.user.department}. Please select the correct department.`
+        };
+      }
+    }
 
         // Store token and user info with backend role format
         localStorage.setItem('token', data.access_token);
@@ -250,7 +263,7 @@ export const AuthProvider = ({ children }) => {
     return roleArray.includes(currentUser.role);
   };
 
-  // FIXED: Updated permissions to use backend role format
+  // ENHANCED: Updated permissions to use backend role format with department filtering
   const hasPermission = (permission) => {
     if (!currentUser) return false;
     
@@ -271,20 +284,51 @@ export const AuthProvider = ({ children }) => {
     return permissions[permission]?.includes(currentUser.role) || false;
   };
 
+  // ENHANCED: Department-based issue access control
   const canAccessIssue = (issue) => {
     if (!currentUser || !issue) return false;
     
     // Admin can access all issues
     if (currentUser.role === 'admin') return true;
     
-    // Staff can access issues in their department
-    if (currentUser.role === 'staff') {
-      return issue.department === currentUser.department;
+    // Department-based filtering for staff and supervisors
+    if (currentUser.role === 'staff' || currentUser.role === 'supervisor') {
+      if (!currentUser.department || !issue.category) return false;
+      
+      // Check if user's department can access this issue category
+      return canDepartmentAccessCategory(currentUser.department, issue.category);
     }
     
-    // Supervisor can access issues assigned to them
-    if (currentUser.role === 'supervisor') {
-      return issue.assignedTo === currentUser.email || issue.assignedTo === currentUser.id;
+    return false;
+  };
+
+  // NEW: Get allowed categories for current user's department
+  const getAllowedCategories = () => {
+    if (!currentUser) return [];
+    
+    // Admin can access all categories
+    if (currentUser.role === 'admin') {
+      return ['roads', 'waste', 'water', 'streetlight', 'other'];
+    }
+    
+    // Department-based categories for staff and supervisors
+    if ((currentUser.role === 'staff' || currentUser.role === 'supervisor') && currentUser.department) {
+      return getDepartmentCategories(currentUser.department);
+    }
+    
+    return [];
+  };
+
+  // NEW: Check if user can access a specific category
+  const canAccessCategory = (category) => {
+    if (!currentUser || !category) return false;
+    
+    // Admin can access all categories
+    if (currentUser.role === 'admin') return true;
+    
+    // Department-based access for staff and supervisors
+    if ((currentUser.role === 'staff' || currentUser.role === 'supervisor') && currentUser.department) {
+      return canDepartmentAccessCategory(currentUser.department, category);
     }
     
     return false;
@@ -327,6 +371,8 @@ export const AuthProvider = ({ children }) => {
     hasRole,
     hasPermission,
     canAccessIssue,
+    getAllowedCategories, // NEW
+    canAccessCategory, // NEW
     apiCall
   };
 

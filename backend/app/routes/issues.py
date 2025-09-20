@@ -18,6 +18,45 @@ import os
 from datetime import datetime
 from io import BytesIO
 
+# Department-Category Mapping (same as frontend)
+DEPARTMENT_CATEGORIES = {
+    'Road Department': ['potholes'],
+    'Electricity Department': ['DamagedElectricalPoles'],
+    'Sanitary Department': ['Garbage'],
+    'Public Service': ['WaterLogging', 'FallenTrees']
+}
+
+def apply_department_filtering(user_role: str, user_department: str, filters: dict) -> dict:
+    """Apply department-based filtering to issue queries."""
+    if user_role == "admin":
+        return filters  # Admin sees all issues
+    
+    if user_role in ["staff", "supervisor"] and user_department:
+        # Get allowed categories for the user's department
+        allowed_categories = DEPARTMENT_CATEGORIES.get(user_department, [])
+        
+        if allowed_categories:
+            # If there's already a category filter, intersect it with allowed categories
+            if "category" in filters:
+                existing_category = filters["category"]
+                if isinstance(existing_category, list):
+                    # Intersect with allowed categories
+                    filters["category"] = [cat for cat in existing_category if cat in allowed_categories]
+                elif existing_category in allowed_categories:
+                    # Keep the existing category if it's allowed
+                    filters["category"] = existing_category
+                else:
+                    # Category not allowed, return empty results
+                    filters["category"] = []
+            else:
+                # Add department filter
+                filters["category"] = allowed_categories
+        else:
+            # Department not mapped, no access
+            filters["category"] = []
+    
+    return filters
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
@@ -337,7 +376,7 @@ async def create_issue_with_image(
 @router.get("/", response_model=IssueListResponse)
 async def list_issues(
     status_filter: Optional[Literal["pending", "in_progress", "resolved"]] = Query(None, alias="status"),
-    category: Optional[Literal["roads", "waste", "water", "streetlight", "other"]] = Query(None),
+    category: Optional[Literal["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]] = Query(None),
     citizen_id: Optional[str] = Query(None, description="Filter by citizen ID"),
     department: Optional[str] = Query(None, description="Filter by assigned department"),
     min_upvotes: Optional[int] = Query(None, description="Minimum upvotes"),
@@ -352,21 +391,17 @@ async def list_issues(
     try:
         # Validate authentication
         user_id, user_role = _validate_user_authentication(current_user)
+        user_department = current_user["profile"].get("department")
         
         filters = {}
         
         # Role-based filtering
         if user_role == "citizen":
             filters["citizen_id"] = user_id
-        elif user_role == "staff":
-            # Staff can see issues assigned to them + all pending issues
-            assigned_issues = get_data("issue_assignments", {"staff_id": user_id})
-            assigned_issue_ids = [a["issue_id"] for a in assigned_issues]
-            # For now, show all issues to staff (can be refined later)
         elif citizen_id and user_role in ["admin", "supervisor"]:
             filters["citizen_id"] = citizen_id
         
-        # Apply other filters
+        # Apply other filters BEFORE department filtering
         if status_filter:
             filters["status"] = status_filter
         if category:
@@ -379,16 +414,20 @@ async def list_issues(
             else:
                 filters["latitude"] = None
         
-        # Department filtering for supervisors
-        if user_role == "supervisor" and department:
-            # Get staff in the department and their assigned issues
-            dept_staff = get_data("profiles", {"department": department, "role": "staff"})
-            staff_ids = [s["id"] for s in dept_staff]
-            if staff_ids:
-                assignments = get_data("issue_assignments", {"staff_id": staff_ids})
-                dept_issue_ids = [a["issue_id"] for a in assignments]
-                if dept_issue_ids:
-                    filters["id"] = dept_issue_ids
+        # APPLY DEPARTMENT FILTERING (NEW)
+        filters = apply_department_filtering(user_role, user_department, filters)
+        
+        # Handle empty category filter (no access)
+        if "category" in filters and not filters["category"]:
+            # Return empty result if user has no access to any categories
+            return IssueListResponse(
+                success=True,
+                issues=[],
+                pagination=PaginationResponse(
+                    total=0, page=page, per_page=per_page, 
+                    total_pages=1, has_next=False, has_prev=False
+                )
+            )
         
         # Search functionality
         if search:
@@ -600,7 +639,7 @@ async def get_issue_stats(
             stats["resolved_issues"] = count_records("issues", {**issues_filter, "status": "resolved"})
             
             # Get issues by category
-            categories = ["roads", "waste", "water", "streetlight", "other"]
+            categories = ["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
             for category in categories:
                 count = count_records("issues", {**issues_filter, "category": category})
                 stats["issues_by_category"][category] = count

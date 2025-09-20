@@ -105,7 +105,7 @@ async def get_dashboard_overview(
             issue_stats.resolved_issues = count_records("issues", {**issue_filters, "status": "resolved"})
             
             # Issues by category
-            categories = ["roads", "waste", "water", "streetlight", "other"]
+            categories = ["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
             for category in categories:
                 count = count_records("issues", {**issue_filters, "category": category})
                 issue_stats.issues_by_category[category] = count
@@ -426,7 +426,7 @@ async def get_performance_metrics(
         avg_resolution_time = _calculate_avg_resolution_time(resolved_issues)
         
         # Category breakdown
-        categories = ["roads", "waste", "water", "streetlight", "other"]
+        categories = ["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
         category_breakdown = {}
         for category in categories:
             count = len([i for i in period_issues if i.get("category") == category])
