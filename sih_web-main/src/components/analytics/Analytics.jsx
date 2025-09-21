@@ -1,65 +1,83 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from "../../context/AuthContext";
 import Header from '../common/Header';
-import { PageLoader, ErrorState } from '../common/LoadingSpinner';
-import { Download, FileText, TrendingUp, Filter, RefreshCw, BarChart3, PieChart, Calendar } from 'lucide-react';
+import Sidebar from '../common/Sidebar';
+import LoadingSpinner, { ErrorState } from '../common/LoadingSpinner';
+import { 
+  Download, 
+  FileText, 
+  Map, 
+  TrendingUp, 
+  Filter, 
+  RefreshCw, 
+  ChevronLeft, 
+  ChevronRight,
+  BarChart3,
+  PieChart,
+  Calendar,
+  Users,
+  AlertTriangle,
+  CheckCircle,
+  Clock
+} from 'lucide-react';
 import apiService from '../../services/api';
-import { ROLES } from '../../utils/constants';
 
 const Analytics = () => {
   const { currentUser } = useAuth();
-  const [analyticsData, setAnalyticsData] = useState({
-    overview: null,
-    trends: null,
-    departments: null,
-    performance: null
-  });
+  const [dashboardData, setDashboardData] = useState(null);
+  const [reportsData, setReportsData] = useState([]);
+  const [pagination, setPagination] = useState(null);
+  const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [dateRange, setDateRange] = useState('30');
+  const [dateRange, setDateRange] = useState(30);
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [period, setPeriod] = useState('month');
-  const [issuesData, setIssuesData] = useState([]);
+  const [perPage, setPerPage] = useState(20);
 
   useEffect(() => {
     if (currentUser) {
-      fetchAnalyticsData();
+      fetchAnalyticsData(currentPage);
     }
-  }, [currentUser, dateRange, period]);
+  }, [currentUser, dateRange, selectedDepartment, period, currentPage, perPage]);
 
-  const fetchAnalyticsData = async () => {
+  const fetchAnalyticsData = async (page = 1) => {
     try {
       setLoading(true);
       setError(null);
 
-      // Use correct backend endpoints based on your API structure
-      const [overviewData, issuesResponse, trendsData, performanceData] = await Promise.allSettled([
-        apiService.get('/api/dashboard'), // Your dashboard endpoint
-        apiService.get(`/api/issues?per_page=100`), // Your issues endpoint
-        apiService.get(`/api/dashboard/trends?days=${dateRange}`), // Your trends endpoint
-        apiService.get(`/api/dashboard/performance?period=${period}`) // Your performance endpoint
+      // Use the correct endpoints that exist in your backend
+      const results = await Promise.allSettled([
+        // Get dashboard data using the correct endpoint
+        apiService.get('/api/dashboard'),
+        
+        // Get issues data with pagination for reports
+        apiService.get('/api/issues/', {
+          page: page,
+          per_page: perPage,
+          order_by: '-created_at',
+          ...(selectedDepartment && { department: selectedDepartment })
+        }),
+
+        // Try to get trends data (with fallback)
+        fetchTrendsWithFallback(),
+
+        // Try to get department stats (with fallback)
+        fetchDepartmentStatsWithFallback()
       ]);
 
-      // Handle overview data
-      if (overviewData.status === 'fulfilled' && overviewData.value) {
-        setAnalyticsData(prev => ({ ...prev, overview: overviewData.value }));
+      // Handle dashboard data
+      if (results[0].status === 'fulfilled' && results[0].value) {
+        setDashboardData(results[0].value);
       }
 
-      // Handle issues data
-      if (issuesResponse.status === 'fulfilled' && issuesResponse.value) {
-        const issues = issuesResponse.value.issues || issuesResponse.value.data || [];
-        setIssuesData(issues);
-        generateLocalAnalytics(issues);
-      }
-
-      // Handle trends data
-      if (trendsData.status === 'fulfilled' && trendsData.value) {
-        setAnalyticsData(prev => ({ ...prev, trends: trendsData.value }));
-      }
-
-      // Handle performance data
-      if (performanceData.status === 'fulfilled' && performanceData.value) {
-        setAnalyticsData(prev => ({ ...prev, performance: performanceData.value }));
+      // Handle issues/reports data
+      if (results[1].status === 'fulfilled' && results[1].value) {
+        const issuesResponse = results[1].value;
+        setReportsData(issuesResponse.issues || issuesResponse.data || []);
+        if (issuesResponse.pagination) {
+          setPagination(issuesResponse.pagination);
+        }
       }
 
     } catch (err) {
@@ -70,398 +88,869 @@ const Analytics = () => {
     }
   };
 
-  const generateLocalAnalytics = (issues) => {
-    if (!issues || issues.length === 0) return;
+  const fetchTrendsWithFallback = async () => {
+    try {
+      // Try the trends endpoint first
+      return await apiService.get('/api/dashboard/trends', { days: dateRange });
+    } catch (error) {
+      console.warn('Trends endpoint not available, creating fallback data');
+      // Create fallback trends data from issues
+      try {
+        const issuesResponse = await apiService.get('/api/issues/', { 
+          per_page: 100,
+          order_by: '-created_at'
+        });
+        return createTrendsFromIssues(issuesResponse.issues || []);
+      } catch (fallbackError) {
+        console.warn('Could not create fallback trends data');
+        return null;
+      }
+    }
+  };
 
-    // Generate status distribution based on your backend status values
-    const statusCounts = issues.reduce((acc, issue) => {
-      const status = issue.status || 'pending';
-      acc[status] = (acc[status] || 0) + 1;
-      return acc;
-    }, {});
+  const fetchDepartmentStatsWithFallback = async () => {
+    try {
+      // Try department stats endpoint
+      return await apiService.get('/api/dashboard/departments');
+    } catch (error) {
+      console.warn('Department stats endpoint not available');
+      return null;
+    }
+  };
 
-    // Generate category distribution based on your backend categories
-    const categoryCounts = issues.reduce((acc, issue) => {
-      const category = issue.category || 'other';
+  const createTrendsFromIssues = (issues) => {
+    // Create simple trends data from issues array
+    const last30Days = Array.from({ length: 30 }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (29 - i));
+      return date.toISOString().split('T')[0];
+    });
+
+    const trendsData = last30Days.map(date => {
+      const dayIssues = issues.filter(issue => {
+        if (!issue.created_at) return false;
+        return issue.created_at.split('T')[0] === date;
+      });
+      
+      return {
+        date: new Date(date).toLocaleDateString(),
+        created: dayIssues.length,
+        resolved: dayIssues.filter(issue => issue.status === 'resolved').length
+      };
+    });
+
+    return { trends: trendsData };
+  };
+
+  const handlePageChange = (newPage) => {
+    setCurrentPage(newPage);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handlePerPageChange = (newPerPage) => {
+    setPerPage(newPerPage);
+    setCurrentPage(1);
+  };
+
+  const handleExportData = async (format) => {
+    try {
+      // Get all data for export (not paginated)
+      const exportParams = {
+        per_page: 1000,
+        order_by: '-created_at'
+      };
+
+      if (selectedDepartment) {
+        exportParams.department = selectedDepartment;
+      }
+
+      if (dateRange !== 'all') {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - dateRange);
+        exportParams.created_after = cutoffDate.toISOString();
+      }
+
+      const exportResponse = await apiService.get('/api/issues/', exportParams);
+      
+      if (exportResponse.issues || exportResponse.data) {
+        const exportData = exportResponse.issues || exportResponse.data || [];
+        
+        if (format === 'csv') {
+          downloadCSV(exportData);
+        } else if (format === 'json') {
+          downloadJSON(exportData);
+        }
+      }
+    } catch (err) {
+      console.error('Export failed:', err);
+      alert('Export failed. Please try again.');
+    }
+  };
+
+  const downloadCSV = (data) => {
+    const headers = ['ID', 'Title', 'Category', 'Status', 'Priority', 'Location', 'Created Date', 'Upvotes'];
+    const csvContent = [
+      headers.join(','),
+      ...data.map(item => [
+        item.id,
+        `"${item.title || ''}"`,
+        item.category || '',
+        item.status || '',
+        item.priority || '',
+        `"${item.location_description || ''}"`,
+        new Date(item.created_at).toLocaleDateString(),
+        item.upvotes || 0
+      ].join(','))
+    ].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reports_${new Date().toISOString().split('T')[0]}.csv`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const downloadJSON = (data) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reports_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    window.URL.revokeObjectURL(url);
+  };
+
+  const getStatusIcon = (status) => {
+    switch (status) {
+      case 'pending':
+        return <AlertTriangle className="h-4 w-4 text-red-500" />;
+      case 'in_progress':
+        return <Clock className="h-4 w-4 text-yellow-500" />;
+      case 'resolved':
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
+      default:
+        return <AlertTriangle className="h-4 w-4 text-gray-500" />;
+    }
+  };
+
+  const getStatusClass = (status) => {
+    switch (status) {
+      case 'pending':
+        return 'bg-red-100 text-red-800';
+      case 'in_progress':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'resolved':
+        return 'bg-green-100 text-green-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  const getPriorityClass = (priority) => {
+    switch (priority) {
+      case 'urgent':
+        return 'bg-red-100 text-red-800';
+      case 'high':
+        return 'bg-orange-100 text-orange-800';
+      case 'medium':
+        return 'bg-yellow-100 text-yellow-800';
+      case 'low':
+        return 'bg-gray-100 text-gray-800';
+      default:
+        return 'bg-gray-100 text-gray-800';
+    }
+  };
+
+  if (loading && !reportsData.length) {
+    return <LoadingSpinner />;
+  }
+
+  if (error) {
+    return <ErrorState message={error} onRetry={() => fetchAnalyticsData(currentPage)} />;
+  }
+
+  return (
+    <div className="min-h-screen bg-gray-50">
+      <Header />
+      <div className="flex">
+        <Sidebar />
+        <main className="flex-1 ml-64 p-8">
+          <div className="max-w-7xl mx-auto">
+            <div className="mb-8">
+              <h1 className="text-3xl font-bold text-gray-900">Analytics & Reports</h1>
+              <p className="mt-2 text-gray-600">Comprehensive insights and data analysis</p>
+            </div>
+
+            {/* Dashboard Stats Cards */}
+            {dashboardData && (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+                <div className="bg-white p-6 rounded-lg shadow-sm">
+                  <div className="flex items-center">
+                    <div className="p-2 bg-blue-100 rounded-lg">
+                      <FileText className="h-6 w-6 text-blue-600" />
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600">Total Issues</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {dashboardData.issue_stats?.total_issues || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-lg shadow-sm">
+                  <div className="flex items-center">
+                    <div className="p-2 bg-yellow-100 rounded-lg">
+                      <Clock className="h-6 w-6 text-yellow-600" />
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600">Pending</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {dashboardData.issue_stats?.pending_issues || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-lg shadow-sm">
+                  <div className="flex items-center">
+                    <div className="p-2 bg-orange-100 rounded-lg">
+                      <RefreshCw className="h-6 w-6 text-orange-600" />
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600">In Progress</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {dashboardData.issue_stats?.in_progress_issues || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 rounded-lg shadow-sm">
+                  <div className="flex items-center">
+                    <div className="p-2 bg-green-100 rounded-lg">
+                      <CheckCircle className="h-6 w-6 text-green-600" />
+                    </div>
+                    <div className="ml-4">
+                      <p className="text-sm font-medium text-gray-600">Resolved</p>
+                      <p className="text-2xl font-bold text-gray-900">
+                        {dashboardData.issue_stats?.resolved_issues || 0}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Filter Controls */}
+            <div className="mb-6 bg-white p-6 rounded-lg shadow-sm">
+              <div className="flex flex-wrap gap-4 items-center">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Date Range
+                  </label>
+                  <select
+                    value={dateRange}
+                    onChange={(e) => setDateRange(parseInt(e.target.value))}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value={7}>Last 7 days</option>
+                    <option value={30}>Last 30 days</option>
+                    <option value={90}>Last 90 days</option>
+                    <option value={365}>Last year</option>
+                  </select>
+                </div>
+
+                {currentUser?.role === 'Admin' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Department
+                    </label>
+                    <select
+                      value={selectedDepartment}
+                      onChange={(e) => setSelectedDepartment(e.target.value)}
+                      className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="">All Departments</option>
+                      <option value="Public Works">Public Works</option>
+                      <option value="Water Management">Water Management</option>
+                      <option value="Waste Management">Waste Management</option>
+                      <option value="Transportation">Transportation</option>
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Items per page
+                  </label>
+                  <select
+                    value={perPage}
+                    onChange={(e) => handlePerPageChange(parseInt(e.target.value))}
+                    className="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value={10}>10</option>
+                    <option value={20}>20</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+
+                <button
+                  onClick={() => fetchAnalyticsData(currentPage)}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center mt-6"
+                >
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Refresh
+                </button>
+              </div>
+            </div>
+
+            {/* Charts and Visual Analytics */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-8">
+              {/* Status Distribution Pie Chart */}
+              <div className="bg-white rounded-lg shadow-sm p-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                  <PieChart className="h-6 w-6 text-blue-500 mr-2" />
+                  Status Distribution
+                </h3>
+                <div className="relative h-64">
+                  <StatusPieChart data={dashboardData} />
+                </div>
+              </div>
+
+              {/* Category Distribution Bar Chart */}
+              <div className="bg-white rounded-lg shadow-sm p-6">
+                <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                  <BarChart3 className="h-6 w-6 text-green-500 mr-2" />
+                  Issues by Category
+                </h3>
+                <div className="relative h-64">
+                  <CategoryBarChart data={reportsData} />
+                </div>
+              </div>
+
+              {/* Trends Line Chart */}
+              <div className="bg-white rounded-lg shadow-sm p-6 lg:col-span-2">
+                <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                  <TrendingUp className="h-6 w-6 text-purple-500 mr-2" />
+                  Issues Trends (Last 30 Days)
+                </h3>
+                <div className="relative h-80">
+                  <TrendsLineChart data={reportsData} />
+                </div>
+              </div>
+            </div>
+
+            {/* Performance Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+              <div className="bg-white rounded-lg shadow-sm p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Resolution Rate</p>
+                    <p className="text-2xl font-bold text-green-600">
+                      {dashboardData?.issue_stats ? 
+                        Math.round((dashboardData.issue_stats.resolved_issues / dashboardData.issue_stats.total_issues) * 100) || 0
+                        : 0}%
+                    </p>
+                  </div>
+                  <div className="p-3 bg-green-100 rounded-full">
+                    <CheckCircle className="h-6 w-6 text-green-600" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Average Response Time</p>
+                    <p className="text-2xl font-bold text-blue-600">
+                      {dashboardData?.issue_stats?.avg_resolution_time ? 
+                        `${Math.round(dashboardData.issue_stats.avg_resolution_time)}h`
+                        : '24h'}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-blue-100 rounded-full">
+                    <Clock className="h-6 w-6 text-blue-600" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-lg shadow-sm p-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-gray-600">Total Upvotes</p>
+                    <p className="text-2xl font-bold text-purple-600">
+                      {dashboardData?.issue_stats?.total_upvotes || 
+                       reportsData.reduce((sum, issue) => sum + (issue.upvotes || 0), 0)}
+                    </p>
+                  </div>
+                  <div className="p-3 bg-purple-100 rounded-full">
+                    <TrendingUp className="h-6 w-6 text-purple-600" />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Reports List Section */}
+            <section className="bg-white rounded-lg shadow-sm p-6 mb-8">
+              <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                <FileText className="h-6 w-6 text-blue-500 mr-2" />
+                Reports Data ({pagination?.total || reportsData.length} total)
+              </h3>
+              
+              {reportsData.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full table-auto">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          ID
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Title
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Category
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Status
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Priority
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Created Date
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Upvotes
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {reportsData.map((report) => (
+                        <tr key={report.id} className="hover:bg-gray-50">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            #{report.id}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-900">
+                            <div className="max-w-xs truncate" title={report.title}>
+                              {report.title}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <span className="inline-flex px-2 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800">
+                              {report.category}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <span className={`inline-flex items-center px-2 py-1 text-xs font-semibold rounded-full ${getStatusClass(report.status)}`}>
+                              {getStatusIcon(report.status)}
+                              <span className="ml-1">{report.status}</span>
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                            <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getPriorityClass(report.priority)}`}>
+                              {report.priority || 'medium'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {new Date(report.created_at).toLocaleDateString()}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {report.upvotes || 0}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <FileText className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No reports data available</h3>
+                  <p className="text-gray-500">Try adjusting your filters or check back later.</p>
+                </div>
+              )}
+
+              {/* Pagination Controls */}
+              {pagination && pagination.total_pages > 1 && (
+                <div className="mt-6 flex items-center justify-between">
+                  <div className="flex items-center text-sm text-gray-700">
+                    <span>
+                      Showing {((pagination.page - 1) * pagination.per_page) + 1} to{' '}
+                      {Math.min(pagination.page * pagination.per_page, pagination.total)} of{' '}
+                      {pagination.total} results
+                    </span>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => handlePageChange(Math.max(1, currentPage - 1))}
+                      disabled={!pagination.has_prev || loading}
+                      className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center"
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Previous
+                    </button>
+                    
+                    <div className="flex items-center space-x-1">
+                      {[...Array(Math.min(5, pagination.total_pages))].map((_, i) => {
+                        const pageNum = Math.max(1, Math.min(
+                          pagination.total_pages - 4, 
+                          pagination.page - 2
+                        )) + i;
+                        return (
+                          <button
+                            key={pageNum}
+                            onClick={() => handlePageChange(pageNum)}
+                            disabled={loading}
+                            className={`px-3 py-2 text-sm rounded-md ${
+                              pageNum === pagination.page
+                                ? 'bg-blue-600 text-white'
+                                : 'bg-white border border-gray-300 hover:bg-gray-50'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    
+                    <button
+                      onClick={() => handlePageChange(Math.min(pagination.total_pages, currentPage + 1))}
+                      disabled={!pagination.has_next || loading}
+                      className="px-3 py-2 text-sm bg-white border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center"
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </section>
+
+            {/* Export Section */}
+            <section className="bg-white rounded-lg shadow-sm p-6">
+              <h3 className="text-xl font-semibold text-gray-900 mb-4 flex items-center">
+                <Download className="h-6 w-6 text-green-500 mr-2" />
+                Export Reports
+              </h3>
+              <div className="flex flex-wrap gap-4">
+                <button
+                  onClick={() => handleExportData('csv')}
+                  className="bg-green-600 text-white px-6 py-3 rounded-lg hover:bg-green-700 transition-colors inline-flex items-center"
+                >
+                  <Download className="h-5 w-5 mr-2" />
+                  Download CSV
+                </button>
+                <button
+                  onClick={() => handleExportData('json')}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors inline-flex items-center"
+                >
+                  <Download className="h-5 w-5 mr-2" />
+                  Download JSON
+                </button>
+              </div>
+              
+              <div className="mt-4 p-4 bg-blue-50 rounded-lg">
+                <p className="text-sm text-blue-800">
+                  <strong>Report includes:</strong> Issue statistics, resolution metrics, 
+                  department performance, category breakdown, and trends based on your current filters.
+                  Data is filtered according to your role permissions.
+                </p>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+};
+
+// Chart Components
+const StatusPieChart = ({ data }) => {
+  const getStatusData = () => {
+    if (!data?.issue_stats) return [];
+    
+    const stats = data.issue_stats;
+    return [
+      { name: 'Pending', value: stats.pending_issues || 0, color: '#EF4444' },
+      { name: 'In Progress', value: stats.in_progress_issues || 0, color: '#F59E0B' },
+      { name: 'Resolved', value: stats.resolved_issues || 0, color: '#10B981' }
+    ].filter(item => item.value > 0);
+  };
+
+  const statusData = getStatusData();
+  const total = statusData.reduce((sum, item) => sum + item.value, 0);
+
+  if (total === 0) {
+    return (
+      <div className="flex items-center justify-center h-full text-gray-500">
+        <div className="text-center">
+          <PieChart className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+          <p>No data available</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center h-full">
+      <div className="relative w-48 h-48 mx-auto">
+        <svg viewBox="0 0 100 100" className="w-full h-full transform -rotate-90">
+          {statusData.map((item, index) => {
+            const percentage = (item.value / total) * 100;
+            const strokeDasharray = `${percentage} ${100 - percentage}`;
+            const strokeDashoffset = statusData.slice(0, index).reduce((sum, prev) => 
+              sum + (prev.value / total) * 100, 0
+            );
+            
+            return (
+              <circle
+                key={item.name}
+                cx="50"
+                cy="50"
+                r="15.915"
+                fill="transparent"
+                stroke={item.color}
+                strokeWidth="8"
+                strokeDasharray={strokeDasharray}
+                strokeDashoffset={-strokeDashoffset}
+                className="transition-all duration-300"
+              />
+            );
+          })}
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-2xl font-bold text-gray-900">{total}</div>
+            <div className="text-sm text-gray-500">Total</div>
+          </div>
+        </div>
+      </div>
+      <div className="ml-8 space-y-3">
+        {statusData.map((item) => (
+          <div key={item.name} className="flex items-center">
+            <div 
+              className="w-4 h-4 rounded-full mr-3"
+              style={{ backgroundColor: item.color }}
+            ></div>
+            <span className="text-sm font-medium text-gray-700">{item.name}</span>
+            <span className="ml-auto text-sm text-gray-500">
+              {item.value} ({Math.round((item.value / total) * 100)}%)
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const CategoryBarChart = ({ data }) => {
+  const getCategoryData = () => {
+    if (!Array.isArray(data)) return [];
+    
+    const categoryCount = data.reduce((acc, issue) => {
+      const category = issue.category || 'Other';
       acc[category] = (acc[category] || 0) + 1;
       return acc;
     }, {});
 
-    // Calculate priority distribution
-    const priorityCounts = issues.reduce((acc, issue) => {
-      const priority = issue.priority || 'medium';
-      acc[priority] = (acc[priority] || 0) + 1;
-      return acc;
-    }, {});
-
-    // Generate time-based data
-    const now = new Date();
-    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-    
-    const timeBasedData = issues
-      .filter(issue => new Date(issue.created_at) >= thirtyDaysAgo)
-      .reduce((acc, issue) => {
-        const date = new Date(issue.created_at).toISOString().split('T')[0];
-        acc[date] = (acc[date] || 0) + 1;
-        return acc;
-      }, {});
-
-    setAnalyticsData(prev => ({
-      ...prev,
-      localAnalytics: {
-        statusDistribution: statusCounts,
-        categoryDistribution: categoryCounts,
-        priorityDistribution: priorityCounts,
-        timeBasedDistribution: timeBasedData,
-        totalIssues: issues.length,
-        recentIssues: issues.filter(issue => 
-          new Date(issue.created_at) >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
-        ).length
-      }
-    }));
+    return Object.entries(categoryCount)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 6); // Top 6 categories
   };
 
-  const exportData = () => {
-    if (!analyticsData.localAnalytics && !issuesData.length) {
-      alert('No data available to export');
-      return;
-    }
+  const categoryData = getCategoryData();
+  const maxValue = Math.max(...categoryData.map(item => item.value), 1);
 
-    let csvContent = 'Type,Count,Label,Date\n';
-    
-    if (analyticsData.localAnalytics) {
-      const { statusDistribution, categoryDistribution, priorityDistribution } = analyticsData.localAnalytics;
-      
-      // Status data
-      Object.entries(statusDistribution || {}).forEach(([status, count]) => {
-        csvContent += `Status,${count},${status},${new Date().toISOString()}\n`;
-      });
-      
-      // Category data
-      Object.entries(categoryDistribution || {}).forEach(([category, count]) => {
-        csvContent += `Category,${count},${category},${new Date().toISOString()}\n`;
-      });
-      
-      // Priority data
-      Object.entries(priorityDistribution || {}).forEach(([priority, count]) => {
-        csvContent += `Priority,${count},${priority},${new Date().toISOString()}\n`;
-      });
-    }
+  const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#06B6D4'];
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', `analytics_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  const renderStatCard = (title, value, Icon, color = 'blue') => {
-    const colorClasses = {
-      blue: 'bg-blue-100 text-blue-600',
-      green: 'bg-green-100 text-green-600',
-      yellow: 'bg-yellow-100 text-yellow-600',
-      red: 'bg-red-100 text-red-600',
-      purple: 'bg-purple-100 text-purple-600'
-    };
-
+  if (categoryData.length === 0) {
     return (
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <div className="flex items-center">
-          <div className={`p-2 rounded-lg ${colorClasses[color]}`}>
-            <Icon className="w-6 h-6" />
-          </div>
-          <div className="ml-4">
-            <p className="text-sm font-medium text-gray-600">{title}</p>
-            <p className="text-2xl font-bold text-gray-900">{value || 0}</p>
-          </div>
+      <div className="flex items-center justify-center h-full text-gray-500">
+        <div className="text-center">
+          <BarChart3 className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+          <p>No data available</p>
         </div>
       </div>
     );
-  };
+  }
 
-  const renderDistributionChart = (title, data, type = 'bar') => {
-    if (!data || Object.keys(data).length === 0) {
-      return (
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
-          <p className="text-gray-500 text-center py-8">No data available</p>
-        </div>
-      );
-    }
-
-    const entries = Object.entries(data).slice(0, 10);
-    const maxValue = Math.max(...entries.map(([, value]) => value));
-
-    return (
-      <div className="bg-white rounded-lg shadow-sm p-6">
-        <h3 className="text-lg font-semibold text-gray-900 mb-4">{title}</h3>
-        <div className="space-y-3">
-          {entries.map(([label, value], index) => (
-            <div key={label} className="flex items-center">
-              <div className="w-24 text-sm text-gray-600 truncate capitalize">{label}</div>
-              <div className="flex-1 mx-3">
-                <div className="bg-gray-200 rounded-full h-2">
-                  <div 
-                    className={`h-2 rounded-full ${
-                      index % 4 === 0 ? 'bg-blue-500' :
-                      index % 4 === 1 ? 'bg-green-500' :
-                      index % 4 === 2 ? 'bg-yellow-500' : 'bg-purple-500'
-                    }`}
-                    style={{ width: `${(value / maxValue) * 100}%` }}
-                  />
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex-1 flex items-end space-x-4 px-4">
+        {categoryData.map((item, index) => {
+          const height = (item.value / maxValue) * 100;
+          return (
+            <div key={item.name} className="flex-1 flex flex-col items-center">
+              <div className="relative w-full">
+                <div 
+                  className="w-full rounded-t-lg transition-all duration-500 ease-in-out"
+                  style={{ 
+                    height: `${Math.max(height, 5)}%`,
+                    backgroundColor: colors[index % colors.length],
+                    minHeight: '20px'
+                  }}
+                ></div>
+                <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 text-xs font-medium text-gray-700">
+                  {item.value}
                 </div>
               </div>
-              <div className="w-12 text-sm font-medium text-gray-900">{value}</div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-4 space-y-2">
+        <div className="grid grid-cols-2 gap-2 text-xs">
+          {categoryData.map((item, index) => (
+            <div key={item.name} className="flex items-center">
+              <div 
+                className="w-3 h-3 rounded mr-2"
+                style={{ backgroundColor: colors[index % colors.length] }}
+              ></div>
+              <span className="truncate" title={item.name}>
+                {item.name.length > 12 ? `${item.name.substring(0, 12)}...` : item.name}
+              </span>
             </div>
           ))}
         </div>
       </div>
-    );
+    </div>
+  );
+};
+
+const TrendsLineChart = ({ data }) => {
+  const getTrendsData = () => {
+    if (!Array.isArray(data)) return [];
+    
+    const last30Days = Array.from({ length: 30 }, (_, i) => {
+      const date = new Date();
+      date.setDate(date.getDate() - (29 - i));
+      return date.toISOString().split('T')[0];
+    });
+
+    return last30Days.map(date => {
+      const dayIssues = data.filter(issue => {
+        if (!issue.created_at) return false;
+        return issue.created_at.split('T')[0] === date;
+      });
+      
+      return {
+        date: new Date(date).getDate(),
+        created: dayIssues.length,
+        resolved: dayIssues.filter(issue => issue.status === 'resolved').length
+      };
+    });
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gray-50">
-        <Header title="Analytics & Reports" />
-        <PageLoader text="Loading analytics data..." />
-      </div>
-    );
-  }
+  const trendsData = getTrendsData();
+  const maxValue = Math.max(
+    ...trendsData.map(item => Math.max(item.created, item.resolved)),
+    1
+  );
 
-  if (error) {
+  if (trendsData.every(item => item.created === 0 && item.resolved === 0)) {
     return (
-      <div className="min-h-screen bg-gray-50">
-        <Header title="Analytics & Reports" />
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          <ErrorState
-            title="Failed to load analytics"
-            message={error}
-            onRetry={fetchAnalyticsData}
-          />
+      <div className="flex items-center justify-center h-full text-gray-500">
+        <div className="text-center">
+          <TrendingUp className="h-16 w-16 mx-auto mb-4 text-gray-300" />
+          <p>No trend data available</p>
         </div>
       </div>
     );
   }
 
-  const { overview, localAnalytics } = analyticsData;
+  const createPath = (data, key) => {
+    const points = data.map((item, index) => {
+      const x = (index / (data.length - 1)) * 100;
+      const y = 100 - (item[key] / maxValue) * 80;
+      return `${x},${y}`;
+    });
+    return `M ${points.join(' L ')}`;
+  };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Header title="Analytics & Reports" />
+    <div className="h-full">
+      <div className="relative h-64 mb-4">
+        <svg viewBox="0 0 100 100" className="w-full h-full" preserveAspectRatio="none">
+          {/* Grid lines */}
+          {[0, 25, 50, 75, 100].map(y => (
+            <line
+              key={y}
+              x1="0"
+              y1={y}
+              x2="100"
+              y2={y}
+              stroke="#F3F4F6"
+              strokeWidth="0.5"
+            />
+          ))}
+          
+          {/* Created issues line */}
+          <path
+            d={createPath(trendsData, 'created')}
+            fill="none"
+            stroke="#3B82F6"
+            strokeWidth="2"
+            className="drop-shadow-sm"
+          />
+          
+          {/* Resolved issues line */}
+          <path
+            d={createPath(trendsData, 'resolved')}
+            fill="none"
+            stroke="#10B981"
+            strokeWidth="2"
+            className="drop-shadow-sm"
+          />
+          
+          {/* Data points */}
+          {trendsData.map((item, index) => {
+            const x = (index / (trendsData.length - 1)) * 100;
+            const createdY = 100 - (item.created / maxValue) * 80;
+            const resolvedY = 100 - (item.resolved / maxValue) * 80;
+            
+            return (
+              <g key={index}>
+                <circle cx={x} cy={createdY} r="1" fill="#3B82F6" />
+                <circle cx={x} cy={resolvedY} r="1" fill="#10B981" />
+              </g>
+            );
+          })}
+        </svg>
+        
+        {/* Y-axis labels */}
+        <div className="absolute left-0 top-0 h-full flex flex-col justify-between text-xs text-gray-500 -ml-8">
+          <span>{maxValue}</span>
+          <span>{Math.round(maxValue * 0.75)}</span>
+          <span>{Math.round(maxValue * 0.5)}</span>
+          <span>{Math.round(maxValue * 0.25)}</span>
+          <span>0</span>
+        </div>
+      </div>
       
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Controls and Filters */}
-        <div className="bg-white rounded-lg shadow-sm p-6 mb-6">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-semibold text-gray-900 flex items-center">
-              <Filter className="h-5 w-5 mr-2" />
-              Analytics Controls
-            </h3>
-            <div className="flex items-center space-x-4">
-              <button
-                onClick={fetchAnalyticsData}
-                disabled={loading}
-                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-                Refresh
-              </button>
-              <button
-                onClick={exportData}
-                className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-              >
-                <Download className="h-4 w-4 mr-2" />
-                Export CSV
-              </button>
-            </div>
-          </div>
-          
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Date Range</label>
-              <select
-                value={dateRange}
-                onChange={(e) => setDateRange(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="7">Last 7 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="90">Last 3 months</option>
-                <option value="365">Last year</option>
-              </select>
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Period</label>
-              <select
-                value={period}
-                onChange={(e) => setPeriod(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="day">Daily</option>
-                <option value="week">Weekly</option>
-                <option value="month">Monthly</option>
-              </select>
-            </div>
-            
-            {(currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.SUPERVISOR) && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
-                <select
-                  value={selectedDepartment}
-                  onChange={(e) => setSelectedDepartment(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">All Departments</option>
-                  <option value="Road Department">Road Department</option>
-                  <option value="Electricity Department">Electricity Department</option>
-                  <option value="Sanitary Department">Sanitary Department</option>
-                  <option value="Public Service">Public Service</option>
-                </select>
-              </div>
-            )}
-          </div>
+      {/* Legend */}
+      <div className="flex justify-center space-x-6">
+        <div className="flex items-center">
+          <div className="w-4 h-0.5 bg-blue-500 mr-2"></div>
+          <span className="text-sm text-gray-600">Issues Created</span>
         </div>
-
-        {/* Overview Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {renderStatCard(
-            'Total Issues',
-            localAnalytics?.totalIssues || overview?.issue_stats?.total_issues || 0,
-            FileText,
-            'blue'
-          )}
-          {renderStatCard(
-            'Recent Issues',
-            localAnalytics?.recentIssues || 0,
-            TrendingUp,
-            'green'
-          )}
-          {renderStatCard(
-            'Pending Issues',
-            localAnalytics?.statusDistribution?.pending || overview?.issue_stats?.pending_issues || 0,
-            BarChart3,
-            'yellow'
-          )}
-          {renderStatCard(
-            'Resolved Issues',
-            localAnalytics?.statusDistribution?.resolved || overview?.issue_stats?.resolved_issues || 0,
-            PieChart,
-            'green'
-          )}
+        <div className="flex items-center">
+          <div className="w-4 h-0.5 bg-green-500 mr-2"></div>
+          <span className="text-sm text-gray-600">Issues Resolved</span>
         </div>
-
-        {/* Charts Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
-          {renderDistributionChart(
-            'Issues by Status',
-            localAnalytics?.statusDistribution
-          )}
-          
-          {renderDistributionChart(
-            'Issues by Category',
-            localAnalytics?.categoryDistribution
-          )}
-          
-          {renderDistributionChart(
-            'Issues by Priority',
-            localAnalytics?.priorityDistribution
-          )}
-          
-          {renderDistributionChart(
-            'Recent Activity (Last 30 Days)',
-            localAnalytics?.timeBasedDistribution
-          )}
-        </div>
-
-        {/* Recent Issues Table */}
-        {issuesData.length > 0 && (
-          <div className="bg-white rounded-lg shadow-sm">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-semibold text-gray-900">Recent Issues</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Title
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Status
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Category
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Priority
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Created
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                  {issuesData.slice(0, 10).map((issue) => (
-                    <tr key={issue.id} className="hover:bg-gray-50">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="text-sm font-medium text-gray-900">
-                          {issue.title || `Issue #${issue.id}`}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          issue.status === 'resolved' ? 'bg-green-100 text-green-800' :
-                          issue.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                          issue.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-gray-100 text-gray-800'
-                        }`}>
-                          {issue.status || 'pending'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
-                        {issue.category || 'other'}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
-                          issue.priority === 'urgent' ? 'bg-red-100 text-red-800' :
-                          issue.priority === 'high' ? 'bg-orange-100 text-orange-800' :
-                          issue.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                          'bg-green-100 text-green-800'
-                        }`}>
-                          {issue.priority || 'medium'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                        {issue.created_at ? new Date(issue.created_at).toLocaleDateString() : 'Unknown'}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* No Data Message */}
-        {!issuesData.length && !loading && (
-          <div className="bg-white rounded-lg shadow-sm p-12 text-center">
-            <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No Data Available</h3>
-            <p className="text-gray-600">
-              No analytics data is currently available. This could be because:
-            </p>
-            <ul className="text-gray-600 mt-2 space-y-1">
-              <li>• No issues have been created yet</li>
-              <li>• You don't have permission to view this data</li>
-              <li>• The backend analytics service is not available</li>
-            </ul>
-          </div>
-        )}
+      </div>
+      
+      {/* X-axis labels */}
+      <div className="flex justify-between mt-2 text-xs text-gray-500">
+        <span>30 days ago</span>
+        <span>15 days ago</span>
+        <span>Today</span>
       </div>
     </div>
   );
