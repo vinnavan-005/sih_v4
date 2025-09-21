@@ -54,11 +54,21 @@ const Sidebar = () => {
 
   // Navigation items based on role and backend endpoints
   const getNavigationItems = () => {
-    if (!currentUser) return [];
+    if (!currentUser) {
+      console.log('No current user found');
+      return [];
+    }
+
+    // DEBUG: Log the current user role
+    console.log('Current User Role:', currentUser.role);
+    console.log('Current User:', currentUser);
 
     const baseItems = [];
 
-    if (currentUser.role === 'admin') {
+    // Check for different possible role formats
+    const userRole = currentUser.role;
+    
+    if (userRole === 'Admin') {
       baseItems.push(
         { 
           path: '/admin-dashboard', 
@@ -109,7 +119,8 @@ const Sidebar = () => {
         { path: '/files', icon: Upload, label: 'File Management' },
         { path: '/settings', icon: Settings, label: 'System Settings', badge: 'admin' }
       );
-    } else if (currentUser.role === 'staff') {
+    } else if (userRole === 'DepartmentStaff' || userRole === 'staff') {
+      console.log('Adding DepartmentStaff navigation items');
       baseItems.push(
         { 
           path: '/staff-dashboard', 
@@ -125,7 +136,7 @@ const Sidebar = () => {
           expanded: expandedSections.issues,
           items: [
             { path: '/issues', icon: FileText, label: 'Department Issues' },
-            { path: '/issues/create', icon: Upload, label: 'Report Issue' },
+            // REMOVED: Report Issue option for department staff
             { path: '/issues/map', icon: MapPin, label: 'Department Map' }
           ]
         },
@@ -136,16 +147,15 @@ const Sidebar = () => {
           icon: Briefcase,
           expanded: expandedSections.assignments,
           items: [
-            { path: '/assignments', icon: ClipboardList, label: 'Manage Assignments' },
-            { path: '/assignments/create', icon: UserCheck, label: 'Assign Tasks' },
-            { path: '/assignments/bulk', icon: Users, label: 'Bulk Assignment' }
+            { path: '/task-assignment', icon: ClipboardList, label: 'Task Assignment' }
+            // REMOVED: Other sub-menu items, only keeping main task assignment
           ]
         },
         { path: '/staff', icon: Users, label: 'Department Staff' },
         { path: '/updates', icon: Bell, label: 'Issue Updates' },
         { path: '/analytics', icon: BarChart3, label: 'Department Analytics' }
       );
-    } else if (currentUser.role === 'supervisor') {
+    } else if (userRole === 'FieldSupervisor' || userRole === 'supervisor') {
       baseItems.push(
         { 
           path: '/supervisor-dashboard', 
@@ -158,8 +168,11 @@ const Sidebar = () => {
         { path: '/issues/nearby', icon: MapPin, label: 'Nearby Issues' },
         { path: '/files/upload', icon: Upload, label: 'Upload Photos' }
       );
+    } else {
+      console.log('Unknown user role:', userRole);
     }
 
+    console.log('Final navigation items:', baseItems);
     return baseItems;
   };
 
@@ -210,13 +223,13 @@ const Sidebar = () => {
                   className={`flex items-center space-x-3 px-4 py-2 rounded-lg transition-colors text-sm ${
                     isActive(subItem.path)
                       ? 'bg-blue-500 text-white'
-                      : 'text-gray-400 hover:bg-slate-700 hover:text-white'
+                      : 'text-gray-300 hover:bg-slate-700 hover:text-white'
                   }`}
                 >
                   <subItem.icon className="h-4 w-4" />
                   <span>{subItem.label}</span>
                   {subItem.badge && (
-                    <span className="ml-auto px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+                    <span className="ml-auto px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
                       {subItem.badge}
                     </span>
                   )}
@@ -228,25 +241,26 @@ const Sidebar = () => {
       );
     }
 
+    // Regular navigation item (now includes direct Task Management link for staff)
     return (
       <Link
         key={item.path}
         to={item.path}
         className={`flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
           isActive(item.path)
-            ? 'bg-blue-600 text-white font-semibold'
+            ? 'bg-blue-600 text-white'
             : 'text-gray-300 hover:bg-slate-700 hover:text-white'
         }`}
       >
         <item.icon className="h-5 w-5" />
         <div className="flex-1">
-          <span>{item.label}</span>
+          <span className="font-medium">{item.label}</span>
           {item.description && (
-            <p className="text-xs opacity-75 mt-0.5">{item.description}</p>
+            <p className="text-xs text-gray-400 mt-1">{item.description}</p>
           )}
         </div>
         {item.badge && (
-          <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+          <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
             {item.badge}
           </span>
         )}
@@ -254,117 +268,91 @@ const Sidebar = () => {
     );
   };
 
-  if (!currentUser) {
-    return null; // Don't show sidebar if not authenticated
+  // Don't render sidebar on auth pages
+  if (location.pathname === '/login' || location.pathname === '/signup') {
+    return null;
   }
 
   return (
-    <aside className="w-60 bg-slate-800 text-white h-screen fixed left-0 top-0 overflow-y-auto custom-scrollbar">
-      <div className="p-6">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <div className="w-12 h-12 bg-blue-600 rounded-xl flex items-center justify-center mx-auto mb-3">
-            <span className="text-white text-xl font-bold">CC</span>
+    <div className="fixed left-0 top-0 h-full w-64 bg-slate-800 text-white shadow-lg z-30 overflow-y-auto">
+      {/* Sidebar Header */}
+      <div className="p-6 border-b border-slate-700">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+            <span className="text-white font-bold text-lg">CC</span>
           </div>
-          <h2 className="text-xl font-semibold">CivicConnect</h2>
-          <p className="text-xs text-slate-400 mt-1">
-            {currentUser.role === 'Admin' && 'System Administration'}
-            {currentUser.role === 'DepartmentStaff' && 'Department Management'}
-            {currentUser.role === 'FieldSupervisor' && 'Field Operations'}
-          </p>
-        </div>
-        
-        {/* User Info Card */}
-        <div className="bg-slate-700 rounded-lg p-4 mb-6">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 bg-blue-500 rounded-full flex items-center justify-center">
-              <span className="text-white text-sm font-medium">
-                {currentUser.fullname?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'}
-              </span>
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-white truncate">
-                {currentUser.fullname || 'User'}
-              </p>
-              <p className="text-xs text-slate-300 truncate">
-                {currentUser.department || 'No Department'}
-              </p>
-            </div>
-          </div>
-        </div>
-        
-        {/* Navigation */}
-        <nav className="space-y-2 mb-8">
-          {navigationItems.map(renderNavigationItem)}
-        </nav>
-
-        {/* Role switching for Admin */}
-        {currentUser.role === 'Admin' && (
-          <div className="pt-4 border-t border-slate-600">
-            <p className="text-xs text-gray-400 mb-3 uppercase tracking-wide font-medium">
-              Switch Views
+          <div>
+            <h1 className="text-xl font-bold">CivicConnect</h1>
+            <p className="text-xs text-slate-300">
+              {currentUser?.role === 'Admin' ? 'Admin Panel' : 
+               currentUser?.role === 'DepartmentStaff' ? 'Staff Portal' : 
+               currentUser?.role === 'FieldSupervisor' ? 'Supervisor Panel' :
+               'User Portal'}
             </p>
-            <div className="space-y-1">
-              <Link
-                to="/staff-dashboard"
-                className="flex items-center space-x-3 px-4 py-2 text-sm text-blue-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
-              >
-                <Users className="h-4 w-4" />
-                <span>Staff View</span>
-              </Link>
-              <Link
-                to="/supervisor-dashboard"
-                className="flex items-center space-x-3 px-4 py-2 text-sm text-blue-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
-              >
-                <Briefcase className="h-4 w-4" />
-                <span>Supervisor View</span>
-              </Link>
-            </div>
           </div>
-        )}
-
-        {/* Quick Stats for Staff/Supervisor */}
-        {(currentUser.role === 'DepartmentStaff' || currentUser.role === 'FieldSupervisor') && (
-          <div className="pt-4 border-t border-slate-600">
-            <p className="text-xs text-gray-400 mb-3 uppercase tracking-wide font-medium">
-              Quick Stats
-            </p>
-            <div className="space-y-2">
-              <div className="bg-slate-700 rounded-lg p-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-slate-300">Active Tasks</span>
-                  <span className="text-sm font-medium text-white">--</span>
-                </div>
-              </div>
-              <div className="bg-slate-700 rounded-lg p-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-slate-300">Completed</span>
-                  <span className="text-sm font-medium text-green-400">--</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Logout */}
-        <div className="pt-6 border-t border-slate-600">
-          <button
-            onClick={handleLogout}
-            className="flex items-center space-x-3 px-4 py-3 w-full text-left text-gray-300 hover:bg-red-600 hover:text-white rounded-lg transition-colors"
-          >
-            <LogOut className="h-5 w-5" />
-            <span>Logout</span>
-          </button>
-        </div>
-
-        {/* Footer */}
-        <div className="pt-4 text-center">
-          <p className="text-xs text-slate-500">
-            v1.0.0 | {new Date().getFullYear()}
-          </p>
         </div>
       </div>
-    </aside>
+
+      {/* User Info */}
+      <div className="p-4 border-b border-slate-700">
+        <div className="flex items-center space-x-3">
+          <div className="w-10 h-10 bg-gray-600 rounded-full flex items-center justify-center">
+            <span className="text-white text-sm font-medium">
+              {currentUser.fullname?.split(' ').map(n => n[0]).join('').toUpperCase() || 'U'}
+            </span>
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-white truncate">
+              {currentUser.fullname || 'User'}
+            </p>
+            <p className="text-xs text-slate-300 truncate">
+              {currentUser.department || 'No Department'}
+            </p>
+          </div>
+        </div>
+      </div>
+      
+      {/* Navigation */}
+      <nav className="space-y-2 mb-8 p-4">
+        {navigationItems.map(renderNavigationItem)}
+      </nav>
+
+      {/* Role switching for Admin */}
+      {currentUser.role === 'Admin' && (
+        <div className="px-4 pt-4 border-t border-slate-600">
+          <p className="text-xs text-gray-400 mb-3 uppercase tracking-wide font-medium">
+            Switch Views
+          </p>
+          <div className="space-y-1">
+            <Link
+              to="/staff-dashboard"
+              className="flex items-center space-x-3 px-4 py-2 text-sm text-blue-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+            >
+              <Users className="h-4 w-4" />
+              <span>Staff View</span>
+            </Link>
+            <Link
+              to="/supervisor-dashboard"
+              className="flex items-center space-x-3 px-4 py-2 text-sm text-blue-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors"
+            >
+              <Briefcase className="h-4 w-4" />
+              <span>Supervisor View</span>
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Logout */}
+      <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-slate-700">
+        <button
+          onClick={handleLogout}
+          className="flex items-center space-x-3 w-full px-4 py-3 text-red-300 hover:text-white hover:bg-red-600 rounded-lg transition-colors"
+        >
+          <LogOut className="h-5 w-5" />
+          <span>Sign Out</span>
+        </button>
+      </div>
+    </div>
   );
 };
 

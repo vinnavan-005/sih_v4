@@ -160,14 +160,7 @@ const AppRoutes = () => {
           </ProtectedRoute>
         } 
       />
-      <Route 
-        path="/task-assignment" 
-        element={
-          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR]}>
-            <TaskAssignment />
-          </ProtectedRoute>
-        } 
-      />
+      <Route path="/task-assignment" element={<TaskAssignment />} />
       <Route 
         path="/manage-assignments" 
         element={
@@ -194,14 +187,8 @@ const AppRoutes = () => {
       />
 
       {/* Updates management routes - THESE WERE MISSING */}
-      <Route 
-        path="/updates" 
-        element={
-          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.STAFF]}>
-            <PlaceholderPage title="Issue Updates" />
-          </ProtectedRoute>
-        } 
-      />
+      <Route path="/updates" element={<Navigate to="/issues" replace />} />
+
       <Route 
         path="/issue-updates" 
         element={
