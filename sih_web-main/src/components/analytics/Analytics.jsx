@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from "../../context/AuthContext";
 import Header from '../common/Header';
 import { PageLoader, ErrorState } from '../common/LoadingSpinner';
-import { Download, FileText, Map, TrendingUp, Filter, RefreshCw, BarChart3, PieChart, Calendar, Users } from 'lucide-react';
+import { Download, FileText, TrendingUp, Filter, RefreshCw, BarChart3, PieChart, Calendar } from 'lucide-react';
 import apiService from '../../services/api';
 import { ROLES } from '../../utils/constants';
 
@@ -32,32 +32,34 @@ const Analytics = () => {
       setLoading(true);
       setError(null);
 
-      // Fetch available data from working endpoints
-      const [overviewData, issuesResponse] = await Promise.allSettled([
-        apiService.dashboard.getOverview(),
-        apiService.issues.list({ per_page: 100 }) // Get more data for analysis
+      // Use correct backend endpoints based on your API structure
+      const [overviewData, issuesResponse, trendsData, performanceData] = await Promise.allSettled([
+        apiService.get('/api/dashboard'), // Your dashboard endpoint
+        apiService.get(`/api/issues?per_page=100`), // Your issues endpoint
+        apiService.get(`/api/dashboard/trends?days=${dateRange}`), // Your trends endpoint
+        apiService.get(`/api/dashboard/performance?period=${period}`) // Your performance endpoint
       ]);
 
-      // Handle overview data (with fallback)
-      if (overviewData.status === 'fulfilled') {
+      // Handle overview data
+      if (overviewData.status === 'fulfilled' && overviewData.value) {
         setAnalyticsData(prev => ({ ...prev, overview: overviewData.value }));
       }
 
-      // Handle issues data for local analytics
-      if (issuesResponse.status === 'fulfilled') {
-        const issues = issuesResponse.value?.issues || issuesResponse.value?.data || [];
+      // Handle issues data
+      if (issuesResponse.status === 'fulfilled' && issuesResponse.value) {
+        const issues = issuesResponse.value.issues || issuesResponse.value.data || [];
         setIssuesData(issues);
-        
-        // Generate local analytics from issues data
         generateLocalAnalytics(issues);
       }
 
-      // Try to fetch additional analytics if available
-      try {
-        const trendsData = await apiService.analytics.getTrends({ period });
-        setAnalyticsData(prev => ({ ...prev, trends: trendsData }));
-      } catch (err) {
-        console.log('Trends endpoint not available, using local data');
+      // Handle trends data
+      if (trendsData.status === 'fulfilled' && trendsData.value) {
+        setAnalyticsData(prev => ({ ...prev, trends: trendsData.value }));
+      }
+
+      // Handle performance data
+      if (performanceData.status === 'fulfilled' && performanceData.value) {
+        setAnalyticsData(prev => ({ ...prev, performance: performanceData.value }));
       }
 
     } catch (err) {
@@ -71,36 +73,35 @@ const Analytics = () => {
   const generateLocalAnalytics = (issues) => {
     if (!issues || issues.length === 0) return;
 
-    // Generate status distribution
+    // Generate status distribution based on your backend status values
     const statusCounts = issues.reduce((acc, issue) => {
-      const status = issue.status || 'unknown';
+      const status = issue.status || 'pending';
       acc[status] = (acc[status] || 0) + 1;
       return acc;
     }, {});
 
-    // Generate category distribution
+    // Generate category distribution based on your backend categories
     const categoryCounts = issues.reduce((acc, issue) => {
-      const category = issue.category || 'Other';
+      const category = issue.category || 'other';
       acc[category] = (acc[category] || 0) + 1;
       return acc;
     }, {});
 
-    // Generate department distribution (if user can see all departments)
-    const departmentCounts = issues.reduce((acc, issue) => {
-      if (issue.department) {
-        acc[issue.department] = (acc[issue.department] || 0) + 1;
-      }
+    // Calculate priority distribution
+    const priorityCounts = issues.reduce((acc, issue) => {
+      const priority = issue.priority || 'medium';
+      acc[priority] = (acc[priority] || 0) + 1;
       return acc;
     }, {});
 
-    // Generate time-based data (last 30 days)
+    // Generate time-based data
     const now = new Date();
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
     
     const timeBasedData = issues
       .filter(issue => new Date(issue.created_at) >= thirtyDaysAgo)
       .reduce((acc, issue) => {
-        const date = new Date(issue.created_at).toLocaleDateString();
+        const date = new Date(issue.created_at).toISOString().split('T')[0];
         acc[date] = (acc[date] || 0) + 1;
         return acc;
       }, {});
@@ -110,7 +111,7 @@ const Analytics = () => {
       localAnalytics: {
         statusDistribution: statusCounts,
         categoryDistribution: categoryCounts,
-        departmentDistribution: departmentCounts,
+        priorityDistribution: priorityCounts,
         timeBasedDistribution: timeBasedData,
         totalIssues: issues.length,
         recentIssues: issues.filter(issue => 
@@ -126,29 +127,27 @@ const Analytics = () => {
       return;
     }
 
-    let csvContent = 'Type,Count,Label,Department\n';
+    let csvContent = 'Type,Count,Label,Date\n';
     
-    // Add local analytics data
     if (analyticsData.localAnalytics) {
-      const { statusDistribution, categoryDistribution, departmentDistribution } = analyticsData.localAnalytics;
+      const { statusDistribution, categoryDistribution, priorityDistribution } = analyticsData.localAnalytics;
       
       // Status data
       Object.entries(statusDistribution || {}).forEach(([status, count]) => {
-        csvContent += `Status,${count},${status},All\n`;
+        csvContent += `Status,${count},${status},${new Date().toISOString()}\n`;
       });
       
       // Category data
       Object.entries(categoryDistribution || {}).forEach(([category, count]) => {
-        csvContent += `Category,${count},${category},All\n`;
+        csvContent += `Category,${count},${category},${new Date().toISOString()}\n`;
       });
       
-      // Department data (if available)
-      Object.entries(departmentDistribution || {}).forEach(([dept, count]) => {
-        csvContent += `Department,${count},${dept},${dept}\n`;
+      // Priority data
+      Object.entries(priorityDistribution || {}).forEach(([priority, count]) => {
+        csvContent += `Priority,${count},${priority},${new Date().toISOString()}\n`;
       });
     }
 
-    // Create and download file
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
@@ -177,7 +176,7 @@ const Analytics = () => {
           </div>
           <div className="ml-4">
             <p className="text-sm font-medium text-gray-600">{title}</p>
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
+            <p className="text-2xl font-bold text-gray-900">{value || 0}</p>
           </div>
         </div>
       </div>
@@ -194,7 +193,7 @@ const Analytics = () => {
       );
     }
 
-    const entries = Object.entries(data).slice(0, 10); // Limit to top 10
+    const entries = Object.entries(data).slice(0, 10);
     const maxValue = Math.max(...entries.map(([, value]) => value));
 
     return (
@@ -203,7 +202,7 @@ const Analytics = () => {
         <div className="space-y-3">
           {entries.map(([label, value], index) => (
             <div key={label} className="flex items-center">
-              <div className="w-24 text-sm text-gray-600 truncate">{label}</div>
+              <div className="w-24 text-sm text-gray-600 truncate capitalize">{label}</div>
               <div className="flex-1 mx-3">
                 <div className="bg-gray-200 rounded-full h-2">
                   <div 
@@ -309,7 +308,7 @@ const Analytics = () => {
               </select>
             </div>
             
-            {currentUser?.role === ROLES.ADMIN && (
+            {(currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.SUPERVISOR) && (
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Department</label>
                 <select
@@ -318,10 +317,10 @@ const Analytics = () => {
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">All Departments</option>
-                  <option value="roads">Roads & Infrastructure</option>
-                  <option value="water">Water & Sanitation</option>
-                  <option value="waste">Waste Management</option>
-                  <option value="electricity">Electricity</option>
+                  <option value="Road Department">Road Department</option>
+                  <option value="Electricity Department">Electricity Department</option>
+                  <option value="Sanitary Department">Sanitary Department</option>
+                  <option value="Public Service">Public Service</option>
                 </select>
               </div>
             )}
@@ -332,7 +331,7 @@ const Analytics = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           {renderStatCard(
             'Total Issues',
-            localAnalytics?.totalIssues || overview?.totalIssues || 0,
+            localAnalytics?.totalIssues || overview?.issue_stats?.total_issues || 0,
             FileText,
             'blue'
           )}
@@ -343,14 +342,14 @@ const Analytics = () => {
             'green'
           )}
           {renderStatCard(
-            'Open Issues',
-            localAnalytics?.statusDistribution?.open || overview?.openIssues || 0,
+            'Pending Issues',
+            localAnalytics?.statusDistribution?.pending || overview?.issue_stats?.pending_issues || 0,
             BarChart3,
             'yellow'
           )}
           {renderStatCard(
             'Resolved Issues',
-            localAnalytics?.statusDistribution?.resolved || overview?.resolvedIssues || 0,
+            localAnalytics?.statusDistribution?.resolved || overview?.issue_stats?.resolved_issues || 0,
             PieChart,
             'green'
           )}
@@ -368,9 +367,9 @@ const Analytics = () => {
             localAnalytics?.categoryDistribution
           )}
           
-          {currentUser?.role === ROLES.ADMIN && renderDistributionChart(
-            'Issues by Department',
-            localAnalytics?.departmentDistribution
+          {renderDistributionChart(
+            'Issues by Priority',
+            localAnalytics?.priorityDistribution
           )}
           
           {renderDistributionChart(
@@ -399,6 +398,9 @@ const Analytics = () => {
                       Category
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Priority
+                    </th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Created
                     </th>
                   </tr>
@@ -415,14 +417,24 @@ const Analytics = () => {
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
                           issue.status === 'resolved' ? 'bg-green-100 text-green-800' :
                           issue.status === 'in_progress' ? 'bg-blue-100 text-blue-800' :
-                          issue.status === 'open' ? 'bg-yellow-100 text-yellow-800' :
+                          issue.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
                           'bg-gray-100 text-gray-800'
                         }`}>
-                          {issue.status || 'unknown'}
+                          {issue.status || 'pending'}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {issue.category || 'Other'}
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
+                        {issue.category || 'other'}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${
+                          issue.priority === 'urgent' ? 'bg-red-100 text-red-800' :
+                          issue.priority === 'high' ? 'bg-orange-100 text-orange-800' :
+                          issue.priority === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                          {issue.priority || 'medium'}
+                        </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {issue.created_at ? new Date(issue.created_at).toLocaleDateString() : 'Unknown'}

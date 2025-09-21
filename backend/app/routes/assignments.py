@@ -6,13 +6,14 @@ from app.supabase_client import (
 from app.schemas import (
     AssignmentCreate, AssignmentResponse, AssignmentUpdate,
     AssignmentListResponse, PaginationResponse, BaseResponse,
-    BulkAssignRequest, BulkOperationResponse
+    BulkAssignRequest, BulkOperationResponse, EscalationRequest
 )
 from app.routes.auth import get_current_user, require_roles
 from app.services.notification_service import NotificationService
 from typing import List, Optional, Literal
 import logging
 import math
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -39,6 +40,19 @@ def _process_assignment_data(assignment_data: dict) -> dict:
     
     return assignment_data
 
+# Add this helper function
+def calculate_deadline(category: str, priority: str = "medium") -> datetime:
+    """Calculate deadline based on category and priority."""
+    sla_hours = {
+        "potholes": {"low": 168, "medium": 72, "high": 24, "urgent": 4},
+        "Garbage": {"low": 48, "medium": 24, "high": 8, "urgent": 2},
+        "WaterLogging": {"low": 72, "medium": 48, "high": 12, "urgent": 4},
+        "DamagedElectricalPoles": {"low": 120, "medium": 72, "high": 24, "urgent": 8},
+        "FallenTrees": {"low": 168, "medium": 96, "high": 48, "urgent": 12}
+    }
+    
+    hours = sla_hours.get(category, {}).get(priority, 72)
+    return datetime.now() + timedelta(hours=hours)
 
 @router.post("/", response_model=AssignmentResponse, status_code=status.HTTP_201_CREATED)
 async def create_assignment(
@@ -155,6 +169,46 @@ async def create_assignment(
             detail="Failed to create assignment"
         )
 
+# Add new escalation endpoint
+@router.post("/{assignment_id}/escalate", response_model=BaseResponse)
+async def escalate_assignment(
+    assignment_id: int,
+    escalation: EscalationRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """Escalate an overdue assignment."""
+    user_id, user_role = _validate_user_authentication(current_user)
+    
+    # Check if user can escalate
+    if user_role not in ["admin", "supervisor"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only supervisors and admins can escalate assignments"
+        )
+    
+    # Get assignment
+    assignment = get_data("issue_assignments", {"id": assignment_id})
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assignment not found"
+        )
+    
+    # Create escalation record (you might want a separate table for this)
+    escalation_data = {
+        "assignment_id": assignment_id,
+        "escalated_by": user_id,
+        "reason": escalation.reason,
+        "escalated_at": datetime.now()
+    }
+    
+    # Update assignment with new deadline
+    new_deadline = datetime.now() + timedelta(hours=24)  # 24 hour extension
+    update_data("issue_assignments", 
+                {"id": assignment_id}, 
+                {"deadline": new_deadline, "notes": f"Escalated: {escalation.reason}"})
+    
+    return BaseResponse(success=True, message="Assignment escalated successfully")
 
 @router.get("/", response_model=AssignmentListResponse)
 async def list_assignments(

@@ -165,7 +165,13 @@ class IssueBase(BaseModel):
     """Base issue model."""
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field(..., min_length=1, max_length=2000)
-    category: Literal["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"]
+    category: Literal[
+        # Standard categories
+        "roads", "waste", "water", "streetlight", "other",
+        # Load test categories (for backward compatibility)
+        "potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"
+    ]
+    priority: Literal["low", "medium", "high", "urgent"] = "medium"
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     image_url: Optional[str] = Field(None, max_length=500)
@@ -180,7 +186,11 @@ class IssueUpdate(BaseModel):
     """Schema for updating issues."""
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     description: Optional[str] = Field(None, min_length=1, max_length=2000)
-    category: Literal["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"] = None
+    category: Optional[Literal[
+        "roads", "waste", "water", "streetlight", "other",
+        "potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"
+    ]] = None
+    priority: Optional[Literal["low", "medium", "high", "urgent"]] = None
     status: Optional[Literal["pending", "in_progress", "resolved"]] = None
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
@@ -192,6 +202,7 @@ class IssueResponse(IssueBase):
     id: int
     citizen_id: str
     status: Literal["pending", "in_progress", "resolved"]
+    priority: Literal["low", "medium", "high", "urgent"] = "medium"
     upvotes: int = 0
     created_at: datetime
     updated_at: datetime
@@ -215,7 +226,11 @@ class IssueListResponse(BaseResponse):
 class IssueSearchRequest(BaseModel):
     """Issue search request."""
     query: Optional[str] = None
-    category: Literal["potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"] = None
+    category: Optional[Literal[
+        "roads", "waste", "water", "streetlight", "other",
+        "potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"
+    ]] = None
+    priority: Optional[Literal["low", "medium", "high", "urgent"]] = None
     status: Optional[Literal["pending", "in_progress", "resolved"]] = None
     citizen_id: Optional[str] = None
     department: Optional[str] = None
@@ -243,22 +258,22 @@ class AssignmentBase(BaseModel):
     staff_id: str
     assigned_by: Optional[str] = None  # Will be set automatically
 
-
 class AssignmentCreate(AssignmentBase):
     """Schema for creating assignments."""
+    deadline: Optional[datetime] = None
     notes: Optional[str] = Field(None, max_length=500)
-
 
 class AssignmentUpdate(BaseModel):
     """Schema for updating assignments."""
     status: Literal["assigned", "in_progress", "completed"]
+    deadline: Optional[datetime] = None
     notes: Optional[str] = Field(None, max_length=500)
-
 
 class AssignmentResponse(AssignmentBase):
     """Assignment response model."""
     id: int
     assigned_at: datetime
+    deadline: Optional[datetime] = None
     status: Literal["assigned", "in_progress", "completed"]
     staff_name: Optional[str] = None
     staff_department: Optional[str] = None
@@ -266,10 +281,42 @@ class AssignmentResponse(AssignmentBase):
     issue_title: Optional[str] = None
     issue_category: Optional[str] = None
     notes: Optional[str] = None
+    is_overdue: Optional[bool] = False
+    days_until_deadline: Optional[int] = None
 
     class Config:
         from_attributes = True
 
+# Add to backend/app/schemas.py
+class SLAConfig(BaseModel):
+    """SLA configuration model."""
+    category: Literal[
+        "roads", "waste", "water", "streetlight", "other",
+        "potholes", "DamagedElectricalPoles", "Garbage", "WaterLogging", "FallenTrees"
+    ]
+    priority: Literal["low", "medium", "high", "urgent"] = "medium"
+    deadline_hours: int = Field(..., gt=0, le=720)  # Max 30 days
+
+# Database migration schema for adding priority to existing issues
+class IssuePriorityUpdate(BaseModel):
+    """Schema for updating issue priorities in bulk."""
+    category_priority_mapping: Dict[str, str] = {
+        "potholes": "medium",
+        "DamagedElectricalPoles": "high", 
+        "Garbage": "low",
+        "WaterLogging": "urgent",
+        "FallenTrees": "high",
+        "roads": "medium",
+        "waste": "low", 
+        "water": "urgent",
+        "streetlight": "high",
+        "other": "medium"
+    }
+class EscalationRequest(BaseModel):
+    """Escalation request model."""
+    assignment_id: int
+    reason: str = Field(..., min_length=10, max_length=500)
+    escalate_to: Optional[str] = None  # supervisor/admin ID
 
 class AssignmentListResponse(BaseResponse):
     """Assignment list response."""

@@ -25,7 +25,26 @@ import TaskAssignment from './components/tasks/TaskAssignment';
 import Settings from './components/settings/Settings';
 import Profile from './components/profile/Profile';
 
-// Import constants - FIXED to use backend roles
+// Import additional components that you'll need to create
+// These are the missing components for the routes your dashboard is trying to navigate to
+// You'll need to create these components in the appropriate folders:
+
+// For now, let's create placeholder components or use existing ones
+// import AssignmentsPage from './components/assignments/AssignmentsPage';
+// import UpdatesPage from './components/updates/UpdatesPage';
+// import CreateIssue from './components/issues/CreateIssue';
+
+// Temporary placeholder component for missing routes
+const PlaceholderPage = ({ title }) => (
+  <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+    <div className="text-center">
+      <h1 className="text-2xl font-bold text-gray-900 mb-4">{title}</h1>
+      <p className="text-gray-600">This page is under development</p>
+    </div>
+  </div>
+);
+
+// Import constants
 import { ROLES } from './utils/constants';
 
 // App Routes component
@@ -72,7 +91,7 @@ const AppRoutes = () => {
         } 
       />
 
-      {/* Protected dashboard routes - FIXED ROLES */}
+      {/* Protected dashboard routes */}
       <Route 
         path="/admin-dashboard" 
         element={
@@ -98,12 +117,20 @@ const AppRoutes = () => {
         } 
       />
 
-      {/* Feature routes with role-based access - FIXED ROLES */}
+      {/* Issue management routes */}
       <Route 
         path="/issues" 
         element={
           <AllRolesRoute>
             <IssueList />
+          </AllRolesRoute>
+        } 
+      />
+      <Route 
+        path="/issues/:id" 
+        element={
+          <AllRolesRoute>
+            <IssueDetails />
           </AllRolesRoute>
         } 
       />
@@ -116,6 +143,76 @@ const AppRoutes = () => {
         } 
       />
       <Route 
+        path="/create-issue" 
+        element={
+          <AllRolesRoute>
+            <PlaceholderPage title="Create Issue" />
+          </AllRolesRoute>
+        } 
+      />
+
+      {/* Assignment management routes - THESE WERE MISSING */}
+      <Route 
+        path="/assignments" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.STAFF]}>
+            <PlaceholderPage title="My Assignments" />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/task-assignment" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR]}>
+            <TaskAssignment />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/manage-assignments" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR]}>
+            <TaskAssignment />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/assign-task" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR]}>
+            <TaskAssignment />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/bulk-assignment" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR]}>
+            <TaskAssignment />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Updates management routes - THESE WERE MISSING */}
+      <Route 
+        path="/updates" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.STAFF]}>
+            <PlaceholderPage title="Issue Updates" />
+          </ProtectedRoute>
+        } 
+      />
+      <Route 
+        path="/issue-updates" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.STAFF]}>
+            <PlaceholderPage title="Issue Updates" />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Analytics and reporting routes */}
+      <Route 
         path="/analytics" 
         element={
           <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.STAFF, ROLES.SUPERVISOR]}>
@@ -124,21 +221,43 @@ const AppRoutes = () => {
         } 
       />
       <Route 
+        path="/reports" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR]}>
+            <Analytics />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Escalation routes */}
+      <Route 
         path="/escalation" 
         element={
-          <AdminOrStaffRoute>
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR]}>
             <Escalation />
-          </AdminOrStaffRoute>
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* User management routes */}
+      <Route 
+        path="/users" 
+        element={
+          <AdminRoute>
+            <PlaceholderPage title="User Management" />
+          </AdminRoute>
         } 
       />
       <Route 
-        path="/task-assignment" 
+        path="/staff" 
         element={
-          <AdminOrStaffRoute>
-            <TaskAssignment />
-          </AdminOrStaffRoute>
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR]}>
+            <PlaceholderPage title="Staff Management" />
+          </ProtectedRoute>
         } 
       />
+
+      {/* Settings and configuration routes */}
       <Route 
         path="/settings" 
         element={
@@ -156,7 +275,35 @@ const AppRoutes = () => {
         } 
       />
 
-      {/* Default redirect based on user role - FIXED */}
+      {/* Department specific routes */}
+      <Route 
+        path="/department" 
+        element={
+          <ProtectedRoute allowedRoles={[ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.STAFF]}>
+            <PlaceholderPage title="Department Dashboard" />
+          </ProtectedRoute>
+        } 
+      />
+
+      {/* Default redirect based on user role */}
+      <Route 
+        path="/dashboard" 
+        element={
+          currentUser ? (
+            <Navigate 
+              to={
+                currentUser.role === ROLES.ADMIN ? '/admin-dashboard' :
+                currentUser.role === ROLES.STAFF ? '/staff-dashboard' :
+                currentUser.role === ROLES.SUPERVISOR ? '/supervisor-dashboard' :
+                '/login'
+              } 
+              replace 
+            />
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        } 
+      />
       <Route 
         path="/" 
         element={

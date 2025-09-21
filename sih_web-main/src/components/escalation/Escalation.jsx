@@ -16,12 +16,13 @@ import {
   RefreshCw,
   Send,
   MessageSquare,
-  BarChart3 // Fixed: Added missing import
+  BarChart3
 } from 'lucide-react';
-import { ROLES, API_ENDPOINTS } from '../../utils/constants'; // Fixed: Use proper API endpoints
+import apiService from '../../services/api';
+import { ROLES } from '../../utils/constants';
 
 const Escalation = () => {
-  const { currentUser, apiCall } = useAuth(); // Fixed: Use apiCall from context
+  const { currentUser } = useAuth();
   const [issues, setIssues] = useState([]);
   const [escalatedIssues, setEscalatedIssues] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -44,26 +45,25 @@ const Escalation = () => {
       setLoading(true);
       setError(null);
 
-      // Fixed: Use proper API endpoint and apiCall method
-      const response = await apiCall(`${API_ENDPOINTS.ISSUES.LIST}?per_page=50`);
+      // Use correct API endpoint from your backend
+      const response = await apiService.get('/api/issues?per_page=50');
       
-      if (response && response.ok) {
-        const data = await response.json();
-        const allIssues = data.issues || data.data || [];
+      if (response) {
+        const allIssues = response.issues || response.data || [];
         
         // Filter for issues that might need escalation
         const needsEscalation = allIssues.filter(issue => {
           const createdDate = new Date(issue.created_at);
           const daysSinceCreated = Math.floor((Date.now() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
           
-          // Logic for escalation candidates:
+          // Logic for escalation candidates based on your backend priority system:
           // - Open for more than 7 days
           // - High priority and open for more than 3 days  
-          // - Critical priority and open for more than 1 day
+          // - Urgent priority and open for more than 1 day
           return (
-            (daysSinceCreated > 7) ||
-            (issue.priority === 'high' && daysSinceCreated > 3) ||
-            (issue.priority === 'critical' && daysSinceCreated > 1) ||
+            (issue.status === 'pending' && daysSinceCreated > 7) ||
+            (issue.priority === 'high' && ['pending', 'in_progress'].includes(issue.status) && daysSinceCreated > 3) ||
+            (issue.priority === 'urgent' && ['pending', 'in_progress'].includes(issue.status) && daysSinceCreated > 1) ||
             (issue.status === 'escalated')
           );
         });
@@ -99,34 +99,27 @@ const Escalation = () => {
     try {
       setActionLoading(selectedIssue.id);
 
-      // Fixed: Use proper API endpoints
-      // Update issue status to escalated
-      const updateResponse = await apiCall(`${API_ENDPOINTS.ISSUES.UPDATE.replace(':id', selectedIssue.id)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          status: 'escalated',
-          priority: 'critical'
-        })
-      });
-
-      if (!updateResponse.ok) {
-        throw new Error('Failed to update issue status');
+      // First, try to escalate using assignments endpoint if it exists
+      try {
+        await apiService.post(`/api/assignments/${selectedIssue.id}/escalate`, {
+          reason: escalationReason
+        });
+      } catch (escalateErr) {
+        // If escalation endpoint doesn't exist, update issue status directly
+        await apiService.put(`/api/issues/${selectedIssue.id}`, {
+          status: 'in_progress', // Your backend doesn't have 'escalated' status, use 'in_progress'
+          priority: 'urgent' // Escalate to urgent priority
+        });
       }
 
-      // Add an update explaining the escalation (if updates endpoint exists)
+      // Add an update explaining the escalation
       try {
-        await apiCall(`${API_ENDPOINTS.UPDATES.CREATE}`, {
-          method: 'POST',
-          body: JSON.stringify({
-            issue_id: selectedIssue.id,
-            update_text: `Issue escalated: ${escalationReason}`,
-            status: 'escalated',
-            added_by: currentUser.id
-          })
+        await apiService.post('/api/updates', {
+          issue_id: selectedIssue.id,
+          update_text: `Issue escalated: ${escalationReason}`
         });
       } catch (updateErr) {
         console.warn('Could not add escalation update:', updateErr);
-        // Continue even if update creation fails
       }
 
       // Refresh data
@@ -152,27 +145,16 @@ const Escalation = () => {
       setActionLoading(issueId);
 
       // Update issue status back to in_progress
-      const response = await apiCall(`${API_ENDPOINTS.ISSUES.UPDATE.replace(':id', issueId)}`, {
-        method: 'PUT',
-        body: JSON.stringify({
-          status: 'in_progress'
-        })
+      await apiService.put(`/api/issues/${issueId}`, {
+        status: 'in_progress',
+        priority: 'medium' // Reset priority
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to resolve escalation');
-      }
-
-      // Add update (if possible)
+      // Add update
       try {
-        await apiCall(`${API_ENDPOINTS.UPDATES.CREATE}`, {
-          method: 'POST',
-          body: JSON.stringify({
-            issue_id: issueId,
-            update_text: 'Escalation resolved. Issue returned to normal workflow.',
-            status: 'info',
-            added_by: currentUser.id
-          })
+        await apiService.post('/api/updates', {
+          issue_id: issueId,
+          update_text: 'Escalation resolved. Issue returned to normal workflow.'
         });
       } catch (updateErr) {
         console.warn('Could not add resolution update:', updateErr);
@@ -197,7 +179,7 @@ const Escalation = () => {
 
   const getPriorityColor = (priority) => {
     switch (priority) {
-      case 'critical':
+      case 'urgent':
         return 'bg-red-100 text-red-800 border-red-200';
       case 'high':
         return 'bg-orange-100 text-orange-800 border-orange-200';
@@ -212,8 +194,8 @@ const Escalation = () => {
 
   const getStatusColor = (status) => {
     switch (status) {
-      case 'escalated':
-        return 'bg-red-100 text-red-800 border-red-200';
+      case 'resolved':
+        return 'bg-green-100 text-green-800 border-green-200';
       case 'in_progress':
         return 'bg-blue-100 text-blue-800 border-blue-200';
       case 'pending':
@@ -222,6 +204,20 @@ const Escalation = () => {
         return 'bg-gray-100 text-gray-800 border-gray-200';
     }
   };
+
+  const getCategoryDisplayName = (category) => {
+    const categoryNames = {
+      'potholes': 'Potholes',
+      'DamagedElectricalPoles': 'Electrical Poles',
+      'Garbage': 'Garbage',
+      'WaterLogging': 'Water Logging',
+      'FallenTrees': 'Fallen Trees'
+    };
+    return categoryNames[category] || category;
+  };
+
+  // Check if user has permission to escalate
+  const canEscalate = currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.SUPERVISOR;
 
   const filteredIssues = issues.filter(issue => {
     const matchesSearch = issue.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -249,6 +245,23 @@ const Escalation = () => {
             message={error}
             onRetry={fetchData}
           />
+        </div>
+      </div>
+    );
+  }
+
+  if (!canEscalate) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <Header title="Issue Escalation" />
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+            <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Access Restricted</h3>
+            <p className="text-gray-600">
+              Only supervisors and administrators can access the escalation management system.
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -289,7 +302,7 @@ const Escalation = () => {
                 <div>
                   <p className="text-sm text-yellow-600">Needs Escalation</p>
                   <p className="text-xl font-bold text-yellow-900">
-                    {filteredIssues.filter(i => i.status !== 'escalated').length}
+                    {filteredIssues.filter(i => i.status !== 'escalated' && i.priority !== 'urgent').length}
                   </p>
                 </div>
               </div>
@@ -299,8 +312,10 @@ const Escalation = () => {
               <div className="flex items-center">
                 <ArrowUp className="h-5 w-5 text-red-600 mr-2" />
                 <div>
-                  <p className="text-sm text-red-600">Currently Escalated</p>
-                  <p className="text-xl font-bold text-red-900">{escalatedIssues.length}</p>
+                  <p className="text-sm text-red-600">High Priority Issues</p>
+                  <p className="text-xl font-bold text-red-900">
+                    {filteredIssues.filter(i => i.priority === 'urgent').length}
+                  </p>
                 </div>
               </div>
             </div>
@@ -309,10 +324,8 @@ const Escalation = () => {
               <div className="flex items-center">
                 <BarChart3 className="h-5 w-5 text-blue-600 mr-2" />
                 <div>
-                  <p className="text-sm text-blue-600">High Priority</p>
-                  <p className="text-xl font-bold text-blue-900">
-                    {filteredIssues.filter(i => i.priority === 'high' || i.priority === 'critical').length}
-                  </p>
+                  <p className="text-sm text-blue-600">Total Issues</p>
+                  <p className="text-xl font-bold text-blue-900">{filteredIssues.length}</p>
                 </div>
               </div>
             </div>
@@ -348,7 +361,7 @@ const Escalation = () => {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">All Priorities</option>
-                <option value="critical">Critical</option>
+                <option value="urgent">Urgent</option>
                 <option value="high">High</option>
                 <option value="medium">Medium</option>
                 <option value="low">Low</option>
@@ -391,7 +404,7 @@ const Escalation = () => {
                       Days Overdue
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Location
+                      Category
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Actions
@@ -414,6 +427,12 @@ const Escalation = () => {
                             <Calendar className="h-3 w-3 mr-1" />
                             Created {new Date(issue.created_at).toLocaleDateString()}
                           </div>
+                          {issue.citizen_name && (
+                            <div className="flex items-center text-xs text-gray-400 mt-1">
+                              <User className="h-3 w-3 mr-1" />
+                              {issue.citizen_name}
+                            </div>
+                          )}
                         </div>
                       </td>
                       
@@ -442,21 +461,21 @@ const Escalation = () => {
                       
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center text-sm text-gray-500">
-                          <MapPin className="h-4 w-4 mr-1" />
-                          {issue.location || 'Not specified'}
+                          <Building className="h-4 w-4 mr-1" />
+                          {getCategoryDisplayName(issue.category)}
                         </div>
                       </td>
                       
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex space-x-2">
-                          {issue.status === 'escalated' ? (
+                          {issue.priority === 'urgent' ? (
                             <button
                               onClick={() => handleResolveEscalation(issue.id)}
                               disabled={actionLoading === issue.id}
                               className="inline-flex items-center px-3 py-1 bg-green-600 text-white text-xs rounded-md hover:bg-green-700 transition-colors disabled:opacity-50"
                             >
                               <CheckCircle className="h-3 w-3 mr-1" />
-                              {actionLoading === issue.id ? 'Resolving...' : 'Resolve'}
+                              {actionLoading === issue.id ? 'Resolving...' : 'De-escalate'}
                             </button>
                           ) : (
                             <button

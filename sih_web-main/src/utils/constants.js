@@ -42,14 +42,12 @@ export const getDashboardRoute = (role) => {
   }
 };
 
-
-
-// ===== DEPARTMENT-CATEGORY MAPPING (NEW) =====
+// ===== DEPARTMENT-CATEGORY MAPPING (UPDATED to match both systems) =====
 export const DEPARTMENT_CATEGORIES = {
-  'Road Department': ['potholes'],
-  'Electricity Department': ['DamagedElectricalPoles'],
-  'Sanitary Department': ['Garbage'],
-  'Public Service': ['WaterLogging', 'FallenTrees']
+  'Road Department': ['potholes', 'roads'], // Support both formats
+  'Electricity Department': ['DamagedElectricalPoles', 'streetlight'],
+  'Sanitary Department': ['Garbage', 'waste'],
+  'Public Service': ['WaterLogging', 'FallenTrees', 'water', 'other']
 };
 
 // Helper function to get allowed categories for a department
@@ -120,7 +118,9 @@ export const API_ENDPOINTS = {
     MY_ASSIGNMENTS: '/api/assignments/my',
     BULK_ASSIGN: '/api/assignments/bulk',
     STATS: '/api/assignments/stats',
-    WORKLOAD: '/api/assignments/workload'
+    WORKLOAD: '/api/assignments/workload',
+    ESCALATE: '/api/assignments/:id/escalate',
+    OVERDUE: '/api/assignments/overdue'
   },
   UPDATES: {
     LIST: '/api/updates/',
@@ -167,74 +167,106 @@ export const API_ENDPOINTS = {
 
 // ===== ISSUE STATUS =====
 export const ISSUE_STATUS = {
-  OPEN: 'open',
+  PENDING: 'pending',
   IN_PROGRESS: 'in_progress',
   RESOLVED: 'resolved',
-  CLOSED: 'closed',
   ESCALATED: 'escalated'
 };
 
 export const ISSUE_STATUS_LABELS = {
-  open: 'Open',
+  pending: 'Pending',
   in_progress: 'In Progress',
   resolved: 'Resolved',
-  closed: 'Closed',
   escalated: 'Escalated'
 };
 
-// ===== ISSUE PRIORITIES =====
+// ===== SLA DEADLINES (FIXED to match both category systems) =====
+export const SLA_DEADLINES = {
+  // Standard categories
+  roads: { low: 168, medium: 72, high: 24, urgent: 4 },
+  waste: { low: 48, medium: 24, high: 8, urgent: 2 },
+  water: { low: 72, medium: 48, high: 12, urgent: 4 },
+  streetlight: { low: 120, medium: 72, high: 24, urgent: 8 },
+  other: { low: 168, medium: 96, high: 48, urgent: 12 },
+  // Load test categories (for backward compatibility)
+  potholes: { low: 168, medium: 72, high: 24, urgent: 4 },
+  DamagedElectricalPoles: { low: 120, medium: 72, high: 24, urgent: 8 },
+  Garbage: { low: 48, medium: 24, high: 8, urgent: 2 },
+  WaterLogging: { low: 72, medium: 48, high: 12, urgent: 4 },
+  FallenTrees: { low: 168, medium: 96, high: 48, urgent: 12 }
+};
+
+// ===== ISSUE PRIORITIES (FIXED) =====
 export const ISSUE_PRIORITY = {
   LOW: 'low',
   MEDIUM: 'medium',
   HIGH: 'high',
-  CRITICAL: 'critical'
+  URGENT: 'urgent' // Changed from CRITICAL to URGENT to match SLA
 };
 
 export const ISSUE_PRIORITY_LABELS = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',
-  critical: 'Critical'
+  urgent: 'Urgent' // Changed from critical to urgent
+};
+
+export const PRIORITY_COLORS = {
+  low: 'text-green-600 bg-green-100',
+  medium: 'text-yellow-600 bg-yellow-100',
+  high: 'text-orange-600 bg-orange-100',
+  urgent: 'text-red-600 bg-red-100' // Fixed to match ISSUE_PRIORITY
 };
 
 // ===== DEPARTMENTS =====
 export const DEPARTMENTS = {
-  ROADS: 'roads',
-  WATER: 'water',
-  WASTE: 'waste',
-  ELECTRICITY: 'electricity',
-  HEALTH: 'health',
-  EDUCATION: 'education',
-  SECURITY: 'security',
-  TRANSPORTATION: 'transportation'
+  ROADS: 'Road Department',
+  ELECTRICITY: 'Electricity Department', 
+  SANITARY: 'Sanitary Department',
+  PUBLIC_SERVICE: 'Public Service'
 };
 
 export const DEPARTMENT_LABELS = {
-  roads: 'Roads & Infrastructure',
-  water: 'Water & Sanitation',
-  waste: 'Waste Management',
-  electricity: 'Electricity & Power',
-  health: 'Public Health',
-  education: 'Education',
-  security: 'Security & Safety',
-  transportation: 'Transportation'
+  'Road Department': 'Roads & Infrastructure',
+  'Electricity Department': 'Electricity & Power',
+  'Sanitary Department': 'Waste Management', 
+  'Public Service': 'Public Services'
 };
 
-// ===== ASSIGNMENT STATUS =====
+// ===== ASSIGNMENT STATUS (FIXED to match backend) =====
 export const ASSIGNMENT_STATUS = {
-  PENDING: 'pending',
-  ACCEPTED: 'accepted',
+  ASSIGNED: 'assigned',
   IN_PROGRESS: 'in_progress',
-  COMPLETED: 'completed',
-  REJECTED: 'rejected'
+  COMPLETED: 'completed'
 };
 
 export const ASSIGNMENT_STATUS_LABELS = {
-  pending: 'Pending',
-  accepted: 'Accepted',
+  assigned: 'Assigned',
   in_progress: 'In Progress',
-  completed: 'Completed',
-  rejected: 'Rejected'
+  completed: 'Completed'
+};
+
+// ===== SLA HELPER FUNCTIONS =====
+export const getSLADeadline = (category, priority = 'medium') => {
+  const slaConfig = SLA_DEADLINES[category];
+  if (!slaConfig) return SLA_DEADLINES.other[priority] || 72;
+  return slaConfig[priority] || slaConfig.medium || 72;
+};
+
+export const calculateDeadline = (category, priority = 'medium') => {
+  const hours = getSLADeadline(category, priority);
+  return new Date(Date.now() + hours * 60 * 60 * 1000);
+};
+
+export const isOverdue = (deadline) => {
+  if (!deadline) return false;
+  return new Date() > new Date(deadline);
+};
+
+export const getDaysUntilDeadline = (deadline) => {
+  if (!deadline) return null;
+  const diff = new Date(deadline) - new Date();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
 };
 
 // ===== ERROR MESSAGES =====
@@ -254,7 +286,10 @@ export const ERROR_MESSAGES = {
   PERMISSION_DENIED: 'Permission denied. Contact your administrator for access.',
   RATE_LIMIT_EXCEEDED: 'Too many requests. Please wait and try again.',
   MAINTENANCE_MODE: 'System is under maintenance. Please try again later.',
-  GENERIC_ERROR: 'Something went wrong. Please try again.'
+  GENERIC_ERROR: 'Something went wrong. Please try again.',
+  ASSIGNMENT_OVERDUE: 'This assignment is overdue and needs immediate attention.',
+  ESCALATION_FAILED: 'Failed to escalate assignment. Please try again.',
+  SLA_BREACH: 'SLA deadline has been breached for this assignment.'
 };
 
 // ===== SUCCESS MESSAGES =====
@@ -268,6 +303,7 @@ export const SUCCESS_MESSAGES = {
   ISSUE_DELETED: 'Issue deleted successfully!',
   ASSIGNMENT_CREATED: 'Task assigned successfully!',
   ASSIGNMENT_UPDATED: 'Assignment updated successfully!',
+  ASSIGNMENT_ESCALATED: 'Assignment escalated successfully!',
   FILE_UPLOADED: 'File uploaded successfully!',
   SETTINGS_SAVED: 'Settings saved successfully!',
   PASSWORD_CHANGED: 'Password changed successfully!',

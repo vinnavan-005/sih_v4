@@ -34,23 +34,28 @@ const StaffDashboard = () => {
       setLoading(true);
       setError(null);
       
-      // Fetch MY assignments (staff can access their own assignments)
-      const assignmentsResponse = await apiService.getMyAssignments({
-        per_page: 50
-      });
+      // Fetch MY assignments using the correct backend endpoint
+      const [assignmentsResponse, issuesResponse] = await Promise.allSettled([
+        apiService.get('/api/assignments/my'),
+        apiService.get('/api/issues?per_page=50')
+      ]);
       
-      // Fetch issues that are either unassigned or assigned to me
-      // Staff users can view issues in general issues list (based on your backend permissions)
-      const issuesResponse = await apiService.getIssues({
-        per_page: 50
-      });
-      
-      if (assignmentsResponse.success) {
-        setMyAssignments(assignmentsResponse.assignments || []);
+      // Handle assignments data
+      if (assignmentsResponse.status === 'fulfilled' && assignmentsResponse.value) {
+        const assignmentsData = assignmentsResponse.value;
+        setMyAssignments(assignmentsData.assignments || assignmentsData.data || []);
+      } else {
+        console.error('Failed to fetch assignments:', assignmentsResponse.reason);
+        setMyAssignments([]);
       }
       
-      if (issuesResponse.success) {
-        setDepartmentIssues(issuesResponse.issues || []);
+      // Handle issues data
+      if (issuesResponse.status === 'fulfilled' && issuesResponse.value) {
+        const issuesData = issuesResponse.value;
+        setDepartmentIssues(issuesData.issues || issuesData.data || []);
+      } else {
+        console.error('Failed to fetch issues:', issuesResponse.reason);
+        setDepartmentIssues([]);
       }
 
     } catch (err) {
@@ -62,26 +67,29 @@ const StaffDashboard = () => {
   };
 
   useEffect(() => {
-    fetchDashboardData();
-    
-    // Auto-refresh every 2 minutes for staff dashboard
-    const interval = setInterval(fetchDashboardData, 2 * 60 * 1000);
-    
-    return () => clearInterval(interval);
-  }, []);
+    if (currentUser) {
+      fetchDashboardData();
+      
+      // Auto-refresh every 2 minutes for staff dashboard
+      const interval = setInterval(fetchDashboardData, 2 * 60 * 1000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
 
   const handleUpdateAssignmentStatus = async (assignmentId, newStatus) => {
     setActionLoading(assignmentId);
     try {
-      const result = await apiService.updateAssignment(assignmentId, {
+      // Use your backend assignment update endpoint
+      const response = await apiService.put(`/api/assignments/${assignmentId}`, {
         status: newStatus
       });
 
-      if (result.success || result.id) {
-        alert(`Assignment status updated to ${newStatus}!`);
+      if (response) {
+        alert(`Assignment status updated to ${newStatus.replace('_', ' ')}!`);
         fetchDashboardData(); // Refresh data
       } else {
-        alert('Status update failed: ' + (result.error || 'Unknown error'));
+        throw new Error('Update failed');
       }
     } catch (err) {
       console.error('Assignment status update error:', err);
@@ -96,17 +104,17 @@ const StaffDashboard = () => {
     if (updateText && updateText.trim()) {
       try {
         setActionLoading(issueId);
-        const result = await apiService.createUpdate({
+        // Use your backend updates endpoint
+        const response = await apiService.post('/api/updates', {
           issue_id: issueId,
-          update_text: updateText.trim(),
-          status: 'info'
+          update_text: updateText.trim()
         });
 
-        if (result.success || result.id) {
+        if (response) {
           alert('Update added successfully!');
           fetchDashboardData();
         } else {
-          alert('Failed to add update: ' + (result.error || 'Unknown error'));
+          throw new Error('Update creation failed');
         }
       } catch (err) {
         console.error('Update error:', err);
@@ -115,6 +123,27 @@ const StaffDashboard = () => {
         setActionLoading(null);
       }
     }
+  };
+
+  // Navigation handlers - these should navigate to the correct routes
+  const handleNavigateToAssignments = () => {
+    navigate('/assignments');
+  };
+
+  const handleNavigateToIssues = () => {
+    navigate('/issues');
+  };
+
+  const handleNavigateToTaskManagement = () => {
+    navigate('/task-assignment');
+  };
+
+  const handleNavigateToUpdates = () => {
+    navigate('/updates');
+  };
+
+  const handleViewIssueDetails = (issueId) => {
+    navigate(`/issues/${issueId}`);
   };
 
   if (loading) {
@@ -165,8 +194,11 @@ const StaffDashboard = () => {
     resolved: departmentIssues.filter(i => i.status === 'resolved').length
   };
 
-  const StatCard = ({ title, value, icon: Icon, color, bgColor }) => (
-    <div className={`${bgColor} rounded-xl p-6 shadow-sm border-t-4 ${color}`}>
+  const StatCard = ({ title, value, icon: Icon, color, bgColor, onClick }) => (
+    <div 
+      className={`${bgColor} rounded-xl p-6 shadow-sm border-t-4 ${color} ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
+      onClick={onClick}
+    >
       <div className="flex items-center justify-between">
         <div>
           <p className="text-gray-600 text-sm font-medium">{title}</p>
@@ -178,6 +210,7 @@ const StaffDashboard = () => {
   );
 
   const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
     return new Date(dateString).toLocaleDateString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -202,6 +235,21 @@ const StaffDashboard = () => {
     }
   };
 
+  const getPriorityColor = (priority) => {
+    switch (priority) {
+      case 'urgent':
+        return 'text-red-600';
+      case 'high':
+        return 'text-orange-600';
+      case 'medium':
+        return 'text-yellow-600';
+      case 'low':
+        return 'text-green-600';
+      default:
+        return 'text-gray-600';
+    }
+  };
+
   return (
     <div className="flex min-h-screen bg-gray-50">
       <Sidebar />
@@ -209,9 +257,9 @@ const StaffDashboard = () => {
       <main className="flex-1 ml-60 p-6">
         <header className="mb-8 flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Department Dashboard</h1>
+            <h1 className="text-3xl font-bold text-gray-900">Staff Dashboard</h1>
             <p className="text-gray-600 mt-2">
-              Welcome, <span className="font-semibold">{currentUser?.fullname}</span>
+              Welcome, <span className="font-semibold">{currentUser?.full_name}</span>
             </p>
             <p className="text-sm text-gray-500">
               Department: {currentUser?.department || 'Not assigned'}
@@ -228,7 +276,7 @@ const StaffDashboard = () => {
           </button>
         </header>
 
-        {/* Stats Cards */}
+        {/* Stats Cards - Make them clickable */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
           <StatCard
             title="My Assignments"
@@ -236,6 +284,7 @@ const StaffDashboard = () => {
             icon={Briefcase}
             color="border-t-blue-500 text-blue-500"
             bgColor="bg-white"
+            onClick={handleNavigateToAssignments}
           />
           <StatCard
             title="In Progress"
@@ -243,6 +292,7 @@ const StaffDashboard = () => {
             icon={Clock}
             color="border-t-yellow-500 text-yellow-500"
             bgColor="bg-white"
+            onClick={handleNavigateToAssignments}
           />
           <StatCard
             title="Completed"
@@ -250,6 +300,7 @@ const StaffDashboard = () => {
             icon={CheckCircle}
             color="border-t-green-500 text-green-500"
             bgColor="bg-white"
+            onClick={handleNavigateToAssignments}
           />
           <StatCard
             title="Total Issues"
@@ -257,7 +308,47 @@ const StaffDashboard = () => {
             icon={FileText}
             color="border-t-purple-500 text-purple-500"
             bgColor="bg-white"
+            onClick={handleNavigateToIssues}
           />
+        </div>
+
+        {/* Quick Actions */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <button
+            onClick={handleNavigateToAssignments}
+            className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 hover:border-blue-300 transition-colors text-left"
+          >
+            <Briefcase className="h-6 w-6 text-blue-500 mb-2" />
+            <div className="text-sm font-medium text-gray-900">My Assignments</div>
+            <div className="text-xs text-gray-500">View and manage tasks</div>
+          </button>
+          
+          <button
+            onClick={handleNavigateToIssues}
+            className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 hover:border-purple-300 transition-colors text-left"
+          >
+            <FileText className="h-6 w-6 text-purple-500 mb-2" />
+            <div className="text-sm font-medium text-gray-900">Browse Issues</div>
+            <div className="text-xs text-gray-500">View all issues</div>
+          </button>
+          
+          <button
+            onClick={handleNavigateToUpdates}
+            className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 hover:border-green-300 transition-colors text-left"
+          >
+            <Edit className="h-6 w-6 text-green-500 mb-2" />
+            <div className="text-sm font-medium text-gray-900">Issue Updates</div>
+            <div className="text-xs text-gray-500">Add progress updates</div>
+          </button>
+          
+          <button
+            onClick={handleNavigateToTaskManagement}
+            className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 hover:border-indigo-300 transition-colors text-left"
+          >
+            <Users className="h-6 w-6 text-indigo-500 mb-2" />
+            <div className="text-sm font-medium text-gray-900">Task Management</div>
+            <div className="text-xs text-gray-500">Manage assignments</div>
+          </button>
         </div>
 
         {/* My Assignments Section */}
@@ -268,7 +359,7 @@ const StaffDashboard = () => {
               My Assignments ({myAssignments.length})
             </h2>
             <button
-              onClick={() => navigate('/assignments')}
+              onClick={handleNavigateToAssignments}
               className="text-blue-600 hover:text-blue-800 text-sm font-medium"
             >
               View All →
@@ -310,11 +401,11 @@ const StaffDashboard = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-gray-900">
-                        {formatDate(assignment.created_at)}
+                        {formatDate(assignment.assigned_at)}
                       </td>
                       <td className="px-6 py-4 text-sm space-x-2">
                         <button
-                          onClick={() => navigate(`/issue-details/${assignment.issue_id}`)}
+                          onClick={() => handleViewIssueDetails(assignment.issue_id)}
                           className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors inline-flex items-center"
                         >
                           <Eye className="h-3 w-3 mr-1" />
@@ -369,7 +460,7 @@ const StaffDashboard = () => {
               Recent Issues ({departmentIssues.length})
             </h2>
             <button
-              onClick={() => navigate('/issues')}
+              onClick={handleNavigateToIssues}
               className="text-purple-600 hover:text-purple-800 text-sm font-medium"
             >
               View All Issues →
@@ -427,10 +518,7 @@ const StaffDashboard = () => {
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <span className={`text-xs font-medium ${
-                          issue.priority === 'high' ? 'text-red-600' :
-                          issue.priority === 'medium' ? 'text-yellow-600' : 'text-green-600'
-                        }`}>
+                        <span className={`text-xs font-medium ${getPriorityColor(issue.priority)}`}>
                           {issue.priority || 'Medium'}
                         </span>
                       </td>
@@ -439,7 +527,7 @@ const StaffDashboard = () => {
                       </td>
                       <td className="px-6 py-4 text-sm">
                         <button
-                          onClick={() => navigate(`/issue-details/${issue.id}`)}
+                          onClick={() => handleViewIssueDetails(issue.id)}
                           className="bg-blue-600 text-white px-3 py-1 rounded text-xs hover:bg-blue-700 transition-colors inline-flex items-center"
                         >
                           <Eye className="h-3 w-3 mr-1" />

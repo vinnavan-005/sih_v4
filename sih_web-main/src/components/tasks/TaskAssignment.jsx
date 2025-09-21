@@ -15,9 +15,10 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiService from '../../services/api';
+import { ROLES } from '../../utils/constants';
 
 const TaskAssignment = () => {
-  const { currentUser, hasPermission } = useAuth();
+  const { currentUser } = useAuth();
   const [pendingIssues, setPendingIssues] = useState([]);
   const [availableStaff, setAvailableStaff] = useState([]);
   const [assignments, setAssignments] = useState([]);
@@ -27,17 +28,22 @@ const TaskAssignment = () => {
   const [error, setError] = useState(null);
   const [message, setMessage] = useState('');
 
+  // Check permissions based on your backend roles
+  const hasAssignPermission = currentUser?.role === ROLES.ADMIN || currentUser?.role === ROLES.SUPERVISOR;
+
   useEffect(() => {
-    loadUserAndData();
-  }, []);
+    if (currentUser) {
+      loadUserAndData();
+    }
+  }, [currentUser]);
 
   const loadUserAndData = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      // Check permissions - using the AuthContext hasPermission method
-      if (!currentUser || !hasPermission('assign-tasks')) {
+      // Check permissions
+      if (!hasAssignPermission) {
         setError('Access denied! Task assignment permission required.');
         return;
       }
@@ -61,18 +67,19 @@ const TaskAssignment = () => {
 
   const loadPendingIssues = async () => {
     try {
-      const params = { 
+      // Use your backend API endpoint structure
+      const params = new URLSearchParams({ 
         status: 'pending', 
-        per_page: 50 
-      };
+        per_page: '50' 
+      });
 
-      // Staff can only see issues in their department
-      if (currentUser.role === 'staff' && currentUser.department) {
-        params.department = currentUser.department;
+      // Apply department filtering for supervisors based on your backend logic
+      if (currentUser.role === ROLES.SUPERVISOR && currentUser.department) {
+        params.append('department', currentUser.department);
       }
 
-      const data = await apiService.issues.list(params);
-      setPendingIssues(data.issues || data.data || []);
+      const response = await apiService.get(`/api/issues?${params.toString()}`);
+      setPendingIssues(response.issues || response.data || []);
     } catch (err) {
       console.error('Error loading pending issues:', err);
       setPendingIssues([]);
@@ -81,15 +88,38 @@ const TaskAssignment = () => {
 
   const loadAvailableStaff = async () => {
     try {
-      const params = {};
+      // Use your backend users endpoint
+      const params = new URLSearchParams({ role: 'staff' });
       
-      // Staff can only see staff in their department  
-      if (currentUser.role === 'staff' && currentUser.department) {
-        params.department = currentUser.department;
+      // Supervisors can only see staff in their department
+      if (currentUser.role === ROLES.SUPERVISOR && currentUser.department) {
+        params.append('department', currentUser.department);
       }
 
-      const data = await apiService.users.getStaff(params);
-      setAvailableStaff(data.users || data.data || []);
+      const response = await apiService.get(`/api/users?${params.toString()}`);
+      const staffList = response.users || response.data || [];
+      
+      // Get workload for each staff member
+      const staffWithWorkload = await Promise.all(
+        staffList.map(async (staff) => {
+          try {
+            const workloadResponse = await apiService.get(`/api/users/${staff.id}/workload`);
+            return {
+              ...staff,
+              active_assignments: workloadResponse.active_assignments || 0,
+              total_assignments: workloadResponse.total_assignments || 0
+            };
+          } catch (err) {
+            return {
+              ...staff,
+              active_assignments: 0,
+              total_assignments: 0
+            };
+          }
+        })
+      );
+      
+      setAvailableStaff(staffWithWorkload);
     } catch (err) {
       console.error('Error loading available staff:', err);
       setAvailableStaff([]);
@@ -98,15 +128,15 @@ const TaskAssignment = () => {
 
   const loadAssignments = async () => {
     try {
-      const params = {};
+      const params = new URLSearchParams();
       
-      // Staff can only see assignments for their department
-      if (currentUser.role === 'staff' && currentUser.department) {
-        params.department = currentUser.department;
+      // Apply department filtering for supervisors
+      if (currentUser.role === ROLES.SUPERVISOR && currentUser.department) {
+        params.append('department', currentUser.department);
       }
 
-      const data = await apiService.assignments.list(params);
-      setAssignments(data.assignments || data.data || []);
+      const response = await apiService.get(`/api/assignments?${params.toString()}`);
+      setAssignments(response.assignments || response.data || []);
     } catch (err) {
       console.error('Error loading assignments:', err);
       setAssignments([]);
@@ -115,21 +145,22 @@ const TaskAssignment = () => {
 
   const loadWorkloadStats = async () => {
     try {
-      const data = await apiService.get('/api/assignments/stats/workload');
-      setWorkloadStats(data);
+      const response = await apiService.get('/api/assignments/stats/workload');
+      setWorkloadStats(response);
     } catch (err) {
       console.error('Error loading workload stats:', err);
       setWorkloadStats({
-        total_assignments: 0,
-        completed_assignments: 0
+        total_staff: 0,
+        total_active_assignments: 0,
+        avg_workload: 0
       });
     }
   };
 
   const loadRecentUpdates = async () => {
     try {
-      const data = await apiService.updates.getRecent({ limit: 10 });
-      setRecentUpdates(data.updates || data.data || []);
+      const response = await apiService.get('/api/updates/recent?limit=10');
+      setRecentUpdates(response.updates || response.data || []);
     } catch (err) {
       console.error('Error loading recent updates:', err);
       setRecentUpdates([]);
@@ -141,11 +172,10 @@ const TaskAssignment = () => {
       const assignmentData = {
         issue_id: issueId,
         staff_id: staffId,
-        notes: notes,
-        assigned_by: currentUser.id
+        notes: notes
       };
 
-      await apiService.assignments.create(assignmentData);
+      await apiService.post('/api/assignments', assignmentData);
       setMessage('Task assigned successfully!');
       await loadUserAndData(); // Reload data
       setTimeout(() => setMessage(''), 3000);
@@ -155,9 +185,13 @@ const TaskAssignment = () => {
     }
   };
 
-  const handleBulkAssign = async (assignments) => {
+  const handleBulkAssign = async (issueIds, staffId, notes = '') => {
     try {
-      await apiService.post('/api/assignments/bulk-assign', { assignments });
+      await apiService.post('/api/assignments/bulk-assign', { 
+        issue_ids: issueIds,
+        staff_id: staffId,
+        notes: notes
+      });
       setMessage('Bulk assignment completed successfully!');
       await loadUserAndData();
       setTimeout(() => setMessage(''), 3000);
@@ -182,8 +216,7 @@ const TaskAssignment = () => {
     const colors = {
       pending: 'bg-yellow-100 text-yellow-800',
       in_progress: 'bg-blue-100 text-blue-800',
-      resolved: 'bg-green-100 text-green-800',
-      overdue: 'bg-red-100 text-red-800'
+      resolved: 'bg-green-100 text-green-800'
     };
     return colors[status] || 'bg-gray-100 text-gray-800';
   };
@@ -193,9 +226,20 @@ const TaskAssignment = () => {
       low: 'text-green-600',
       medium: 'text-yellow-600',
       high: 'text-orange-600',
-      critical: 'text-red-600'
+      urgent: 'text-red-600'
     };
     return colors[priority] || 'text-gray-600';
+  };
+
+  const getCategoryDisplayName = (category) => {
+    const categoryNames = {
+      'potholes': 'Potholes',
+      'DamagedElectricalPoles': 'Electrical Poles',
+      'Garbage': 'Garbage',
+      'WaterLogging': 'Water Logging',
+      'FallenTrees': 'Fallen Trees'
+    };
+    return categoryNames[category] || category;
   };
 
   if (loading) {
@@ -227,6 +271,35 @@ const TaskAssignment = () => {
     );
   }
 
+  if (!hasAssignPermission) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="bg-white shadow">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex justify-between items-center py-6">
+              <div className="flex items-center">
+                <ClipboardList className="h-8 w-8 text-blue-600 mr-3" />
+                <div>
+                  <h1 className="text-2xl font-bold text-gray-900">Task Assignment</h1>
+                  <p className="text-gray-600">Access Restricted</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+            <AlertTriangle className="h-12 w-12 text-yellow-500 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-900 mb-2">Access Restricted</h3>
+            <p className="text-gray-600">
+              Only supervisors and administrators can access the task assignment system.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -242,13 +315,14 @@ const TaskAssignment = () => {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600">
-                Logged in as: <strong>{currentUser?.fullname}</strong> ({currentUser?.role})
+                Logged in as: <strong>{currentUser?.full_name}</strong> ({currentUser?.role})
               </span>
               <button
                 onClick={loadUserAndData}
-                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+                disabled={loading}
+                className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center disabled:opacity-50"
               >
-                <RefreshCw className="h-4 w-4 mr-2" />
+                <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
                 Refresh
               </button>
             </div>
@@ -310,7 +384,7 @@ const TaskAssignment = () => {
                           <div className="flex items-center space-x-4">
                             <span className="flex items-center">
                               <Building className="h-4 w-4 mr-1" />
-                              {issue.category || 'General'}
+                              {getCategoryDisplayName(issue.category)}
                             </span>
                             <span className="flex items-center">
                               <User className="h-4 w-4 mr-1" />
@@ -351,15 +425,23 @@ const TaskAssignment = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div className="text-center">
                       <div className="text-2xl font-bold text-blue-600">
-                        {workloadStats.total_assignments || 0}
+                        {workloadStats.total_staff || availableStaff.length}
                       </div>
-                      <div className="text-sm text-gray-600">Total Assignments</div>
+                      <div className="text-sm text-gray-600">Staff Members</div>
                     </div>
                     <div className="text-center">
                       <div className="text-2xl font-bold text-green-600">
-                        {workloadStats.completed_assignments || 0}
+                        {workloadStats.total_active_assignments || assignments.length}
                       </div>
-                      <div className="text-sm text-gray-600">Completed</div>
+                      <div className="text-sm text-gray-600">Active Tasks</div>
+                    </div>
+                  </div>
+                  <div className="mt-4 pt-4 border-t border-gray-100">
+                    <div className="text-center">
+                      <div className="text-lg font-medium text-gray-900">
+                        {workloadStats.avg_workload || 0}
+                      </div>
+                      <div className="text-sm text-gray-600">Avg Tasks per Staff</div>
                     </div>
                   </div>
                 </div>
@@ -382,12 +464,15 @@ const TaskAssignment = () => {
                     {availableStaff.map((staff) => (
                       <div key={staff.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                         <div>
-                          <p className="font-medium text-gray-900">{staff.full_name || staff.fullname}</p>
+                          <p className="font-medium text-gray-900">{staff.full_name}</p>
                           <p className="text-sm text-gray-600">{staff.department}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-sm font-medium text-blue-600">
-                            {staff.current_assignments || 0} tasks
+                            {staff.active_assignments || 0} tasks
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {staff.total_assignments || 0} total
                           </p>
                         </div>
                       </div>
@@ -418,6 +503,36 @@ const TaskAssignment = () => {
                     ))}
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* Current Assignments Summary */}
+            <div className="bg-white rounded-xl shadow-sm">
+              <div className="px-6 py-4 border-b border-gray-200">
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center">
+                  <ClipboardList className="h-5 w-5 mr-2" />
+                  Assignment Summary
+                </h2>
+              </div>
+              <div className="p-6">
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Total Assignments:</span>
+                    <span className="text-sm font-medium">{assignments.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Active:</span>
+                    <span className="text-sm font-medium text-blue-600">
+                      {assignments.filter(a => ['assigned', 'in_progress'].includes(a.status)).length}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Completed:</span>
+                    <span className="text-sm font-medium text-green-600">
+                      {assignments.filter(a => a.status === 'completed').length}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -461,7 +576,7 @@ const AssignmentForm = ({ issue, availableStaff, onAssign }) => {
           <option value="">Select staff member...</option>
           {availableStaff.map((staff) => (
             <option key={staff.id} value={staff.id}>
-              {staff.full_name || staff.fullname} ({staff.current_assignments || 0} tasks)
+              {staff.full_name} ({staff.active_assignments || 0} tasks)
             </option>
           ))}
         </select>

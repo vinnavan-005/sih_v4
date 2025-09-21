@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { 
   Users, 
   Cog, 
-  Trash2, 
   UserPlus,
   Save,
   AlertCircle,
@@ -15,10 +14,10 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import apiService from '../../services/api';
-import { ROLES, ROLE_LABELS } from '../../utils/constants';
+import { ROLES } from '../../utils/constants';
 
 const Settings = () => {
-  const { currentUser, hasPermission } = useAuth();
+  const { currentUser } = useAuth();
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -39,6 +38,14 @@ const Settings = () => {
     admins: 0
   });
 
+  // Role labels based on your backend roles
+  const ROLE_LABELS = {
+    [ROLES.CITIZEN]: 'Citizen',
+    [ROLES.STAFF]: 'Staff',
+    [ROLES.SUPERVISOR]: 'Supervisor',
+    [ROLES.ADMIN]: 'Administrator'
+  };
+
   const roles = [
     { value: ROLES.CITIZEN, label: ROLE_LABELS[ROLES.CITIZEN] },
     { value: ROLES.STAFF, label: ROLE_LABELS[ROLES.STAFF] },
@@ -46,20 +53,30 @@ const Settings = () => {
     { value: ROLES.ADMIN, label: ROLE_LABELS[ROLES.ADMIN] }
   ];
 
+  // Department names from your backend
+  const DEPARTMENT_OPTIONS = [
+    'Road Department',
+    'Electricity Department', 
+    'Sanitary Department',
+    'Public Service'
+  ];
+
+  // Check permissions based on your backend RBAC
+  const hasManageUsersPermission = currentUser?.role === ROLES.ADMIN;
+
   useEffect(() => {
-    loadInitialData();
+    if (currentUser) {
+      loadInitialData();
+    }
   }, [currentUser]);
 
   const loadInitialData = async () => {
     try {
       setLoading(true);
       
-      // Check if user has manage users permission
-      if (!currentUser || !hasPermission('manage-users')) {
-        setMessage('Access denied! Admin privileges required.');
-        setTimeout(() => {
-          window.location.href = '/dashboard';
-        }, 2000);
+      // Check if user has admin role (only admins can manage users in your backend)
+      if (!currentUser || currentUser.role !== ROLES.ADMIN) {
+        setMessage('Access denied! Administrator privileges required.');
         return;
       }
 
@@ -80,8 +97,9 @@ const Settings = () => {
 
   const loadUsers = async () => {
     try {
-      const data = await apiService.users.list({ per_page: 100 });
-      setUsers(data.users || data.data || []);
+      // Use your backend API endpoint
+      const response = await apiService.get('/api/users?per_page=100');
+      setUsers(response.users || response.data || response || []);
     } catch (err) {
       console.error('Failed to load users:', err);
       setUsers([]);
@@ -89,24 +107,20 @@ const Settings = () => {
   };
 
   const loadDepartments = async () => {
-    try {
-      const data = await apiService.users.getDepartments();
-      setDepartments(data.departments || data || []);
-    } catch (err) {
-      console.error('Failed to load departments:', err);
-      setDepartments([]);
-    }
+    // Use hardcoded departments based on your backend structure
+    setDepartments(DEPARTMENT_OPTIONS);
   };
 
   const loadUserStats = async () => {
     try {
-      const data = await apiService.users.getStats();
+      // Use your backend stats endpoint
+      const response = await apiService.get('/api/users/stats');
       setUserStats({
-        total_users: data.total_users || 0,
-        citizens: data.citizens || 0,
-        staff: data.staff || 0,
-        supervisors: data.supervisors || 0,
-        admins: data.admins || 0
+        total_users: response.total_users || 0,
+        citizens: response.citizens || 0,
+        staff: response.staff || 0,
+        supervisors: response.supervisors || 0,
+        admins: response.admins || 0
       });
     } catch (err) {
       console.error('Failed to load user stats:', err);
@@ -129,14 +143,14 @@ const Settings = () => {
       return;
     }
 
-    // Check if department is required for non-citizen roles
+    // Check if department is required for staff/supervisor roles (from your backend logic)
     if ((newUser.role === ROLES.STAFF || newUser.role === ROLES.SUPERVISOR) && !newUser.department) {
       setMessage('Please select a department for this role.');
       return;
     }
 
     try {
-      // Create user with the new API service
+      // Create user using your backend registration endpoint with role
       const userData = {
         email: newUser.email,
         password: newUser.password,
@@ -144,12 +158,13 @@ const Settings = () => {
         role: newUser.role
       };
 
-      // Add department if specified
+      // Add department if specified (for staff/supervisor)
       if (newUser.department) {
         userData.department = newUser.department;
       }
 
-      await apiService.auth.register(userData);
+      // Use your backend auth/register endpoint that supports role assignment
+      await apiService.post('/api/auth/register', userData);
 
       setMessage('User created successfully!');
       setNewUser({ full_name: '', email: '', role: '', password: '', department: '' });
@@ -158,7 +173,7 @@ const Settings = () => {
       await Promise.all([loadUsers(), loadUserStats()]);
       
     } catch (err) {
-      setMessage(`Error: ${err.message}`);
+      setMessage(`Error: ${err.response?.data?.detail || err.message}`);
     }
 
     setTimeout(() => setMessage(''), 5000);
@@ -170,31 +185,18 @@ const Settings = () => {
     }
 
     try {
-      await apiService.users.changeRole(userId, newRole);
+      // Use your backend change role endpoint
+      await apiService.post(`/api/users/${userId}/change-role`, { new_role: newRole });
       setMessage('User role updated successfully!');
       await Promise.all([loadUsers(), loadUserStats()]);
     } catch (err) {
-      setMessage(`Error: ${err.message}`);
+      setMessage(`Error: ${err.response?.data?.detail || err.message}`);
     }
 
     setTimeout(() => setMessage(''), 3000);
   };
 
-  const handleDeleteUser = async (userId) => {
-    if (!window.confirm('Are you sure you want to delete this user? This action cannot be undone.')) {
-      return;
-    }
-
-    try {
-      await apiService.users.delete(userId);
-      setMessage('User deleted successfully!');
-      await Promise.all([loadUsers(), loadUserStats()]);
-    } catch (err) {
-      setMessage(`Error: ${err.message}`);
-    }
-
-    setTimeout(() => setMessage(''), 3000);
-  };
+  // User deletion removed - not needed for this application
 
   const getRoleColor = (role) => {
     switch (role) {
@@ -222,13 +224,13 @@ const Settings = () => {
     );
   }
 
-  if (!currentUser || !hasPermission('manage-users')) {
+  if (!currentUser || !hasManageUsersPermission) {
     return (
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded text-center">
             <AlertCircle className="h-6 w-6 inline mr-2" />
-            Access denied! Admin privileges required.
+            Access denied! Administrator privileges required.
           </div>
         </div>
       </div>
@@ -247,9 +249,10 @@ const Settings = () => {
             </div>
             <button
               onClick={loadInitialData}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+              disabled={loading}
+              className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors flex items-center disabled:opacity-50"
             >
-              <RefreshCw className="h-4 w-4 mr-2" />
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
               Refresh
             </button>
           </div>
@@ -276,7 +279,7 @@ const Settings = () => {
         )}
 
         {/* User Statistics */}
-        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6 mb-8">
           <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-blue-500">
             <div className="flex items-center justify-between">
               <div>
@@ -311,6 +314,15 @@ const Settings = () => {
                 <p className="text-3xl font-bold text-gray-900 mt-2">{userStats.supervisors}</p>
               </div>
               <Users className="h-8 w-8 text-purple-500" />
+            </div>
+          </div>
+          <div className="bg-white p-6 rounded-lg shadow-sm border-l-4 border-red-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-gray-600 text-sm font-medium">Admins</p>
+                <p className="text-3xl font-bold text-gray-900 mt-2">{userStats.admins}</p>
+              </div>
+              <Shield className="h-8 w-8 text-red-500" />
             </div>
           </div>
         </section>
@@ -361,6 +373,7 @@ const Settings = () => {
                   onChange={(e) => setNewUser({...newUser, password: e.target.value})}
                   className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent w-full pr-10"
                   required
+                  minLength={6}
                 />
                 <button
                   type="button"
@@ -409,9 +422,6 @@ const Settings = () => {
                       User
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                      Email
-                    </th>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                       Role
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
@@ -434,12 +444,9 @@ const Settings = () => {
                             {user.full_name || 'N/A'}
                           </div>
                           <div className="text-sm text-gray-500">
-                            ID: {user.id}
+                            {user.phone || 'No phone'}
                           </div>
                         </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                        {user.email || 'N/A'}
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={`inline-flex px-2 py-1 text-xs font-semibold rounded-full ${getRoleColor(user.role)}`}>
@@ -455,7 +462,7 @@ const Settings = () => {
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {user.created_at ? new Date(user.created_at).toLocaleDateString() : 'N/A'}
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                         <select
                           onChange={(e) => e.target.value && handleChangeUserRole(user.id, e.target.value)}
                           className="text-xs border border-gray-300 rounded px-2 py-1 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -467,15 +474,6 @@ const Settings = () => {
                             <option key={role.value} value={role.value}>{role.label}</option>
                           ))}
                         </select>
-                        {user.id !== currentUser?.id && (
-                          <button
-                            onClick={() => handleDeleteUser(user.id)}
-                            className="text-red-600 hover:text-red-800 transition-colors"
-                            title="Delete User"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
                       </td>
                     </tr>
                   ))}
@@ -496,20 +494,24 @@ const Settings = () => {
             <div>
               <h4 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
                 <Database className="h-5 w-5 mr-2" />
-                API Status
+                Backend Status
               </h4>
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-600">Backend URL:</span>
-                  <span className="text-gray-900">{apiService.baseURL}</span>
+                  <span className="text-gray-600">API Version:</span>
+                  <span className="text-gray-900">1.0.0</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Authentication:</span>
                   <span className="text-green-600">Active</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-600">User Role:</span>
+                  <span className="text-gray-600">Your Role:</span>
                   <span className="text-blue-600">{ROLE_LABELS[currentUser?.role] || currentUser?.role}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Department:</span>
+                  <span className="text-gray-900">{currentUser?.department || 'N/A'}</span>
                 </div>
               </div>
             </div>
@@ -517,11 +519,11 @@ const Settings = () => {
             <div>
               <h4 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
                 <Building className="h-5 w-5 mr-2" />
-                Departments
+                Available Departments
               </h4>
               <div className="space-y-1 text-sm">
                 {departments.length === 0 ? (
-                  <p className="text-gray-500">No departments configured</p>
+                  <p className="text-gray-500">Loading departments...</p>
                 ) : (
                   departments.map((dept, index) => (
                     <div key={index} className="flex items-center">
@@ -536,26 +538,30 @@ const Settings = () => {
             <div>
               <h4 className="text-lg font-medium text-gray-900 mb-3 flex items-center">
                 <Shield className="h-5 w-5 mr-2" />
-                Permissions
+                Role Capabilities
               </h4>
               <div className="space-y-1 text-sm">
                 <div className="flex items-center">
                   <span className="text-gray-600">Manage Users:</span>
-                  <span className={`ml-2 ${hasPermission('manage-users') ? 'text-green-600' : 'text-red-600'}`}>
-                    {hasPermission('manage-users') ? 'Yes' : 'No'}
+                  <span className={`ml-2 ${currentUser?.role === ROLES.ADMIN ? 'text-green-600' : 'text-red-600'}`}>
+                    {currentUser?.role === ROLES.ADMIN ? 'Yes' : 'No'}
                   </span>
                 </div>
                 <div className="flex items-center">
-                  <span className="text-gray-600">System Settings:</span>
-                  <span className={`ml-2 ${hasPermission('system-settings') ? 'text-green-600' : 'text-red-600'}`}>
-                    {hasPermission('system-settings') ? 'Yes' : 'No'}
+                  <span className="text-gray-600">Assign Tasks:</span>
+                  <span className={`ml-2 ${[ROLES.ADMIN, ROLES.SUPERVISOR].includes(currentUser?.role) ? 'text-green-600' : 'text-red-600'}`}>
+                    {[ROLES.ADMIN, ROLES.SUPERVISOR].includes(currentUser?.role) ? 'Yes' : 'No'}
                   </span>
                 </div>
                 <div className="flex items-center">
                   <span className="text-gray-600">View Analytics:</span>
-                  <span className={`ml-2 ${hasPermission('view-analytics') ? 'text-green-600' : 'text-red-600'}`}>
-                    {hasPermission('view-analytics') ? 'Yes' : 'No'}
+                  <span className={`ml-2 ${[ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.STAFF].includes(currentUser?.role) ? 'text-green-600' : 'text-red-600'}`}>
+                    {[ROLES.ADMIN, ROLES.SUPERVISOR, ROLES.STAFF].includes(currentUser?.role) ? 'Yes' : 'No'}
                   </span>
+                </div>
+                <div className="flex items-center">
+                  <span className="text-gray-600">Create Issues:</span>
+                  <span className="ml-2 text-green-600">Yes</span>
                 </div>
               </div>
             </div>
